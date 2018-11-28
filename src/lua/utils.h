@@ -517,7 +517,6 @@ luaT_tolstring(lua_State *L, int idx, size_t *ssize);
 LUA_API int
 luaL_iscallable(lua_State *L, int idx);
 
-
 /**
  * @brief Creates a new Lua coroutine in a protected frame. If
  * <lua_newthread> call underneath succeeds, the created Lua state

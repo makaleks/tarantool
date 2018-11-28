@@ -143,6 +143,7 @@ luaT_release_temp_luastate
 luaT_state
 luaT_temp_luastate
 luaT_tolstring
+luaL_iscallable
 box_txn
 box_txn_begin
 box_txn_commit
