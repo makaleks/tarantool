@@ -1456,6 +1456,107 @@ base_index_mt.bsize = function(index)
     end
     return tonumber(ret)
 end
+-- index.fselect - formatted select.
+base_index_mt.fselect = function(index, key, opts)
+    -- options.
+    local max_width = 140
+    local min_col_width = 5
+    if opts and opts.max_width and type(opts.max_width) == 'number' then
+        max_width = opts.max_width
+    end
+
+    -- select and stringify.
+    local tab = { }
+    local json = require('json')
+    for _,t in index:pairs(key, opts) do
+        local row = { }
+        for _,f in t:pairs() do
+            table.insert(row, json.encode(f))
+        end
+        table.insert(tab, row)
+    end
+
+    local num_rows = #tab
+    local space = box.space[index.space_id]
+    local fmt = space:format() 
+    local num_cols = math.max(#fmt, 1)
+    for i = 1,num_rows do
+        num_cols = math.max(num_cols, #tab[i])
+    end
+
+    local names = {}
+    for j = 1,num_cols do
+        table.insert(names, fmt[j] and fmt[j].name or 'col' .. tostring(j))
+    end
+    local widths = {}
+    local real_width = num_cols + 1 -- including '|' symbols
+    for j = 1,num_cols do
+        local width = math.max(names[j]:len(), min_col_width)
+        for i = 1,num_rows do
+            if tab[i][j] then
+                width = math.max(width, tab[i][j]:len())
+            end
+        end
+        real_width = real_width + width
+        table.insert(widths, width)
+    end
+
+    -- cut some columns if its width is too big
+    while (real_width > max_width) do
+        local max_j = 1
+        for j = 2,num_cols do
+            if widths[j] >= widths[max_j] then max_j = j end
+        end
+        widths[max_j] = widths[max_j] - 1
+        real_width = real_width - 1
+    end
+
+    -- I guess there's a bug and yaml treats string '+---' as not a string.
+    -- As a workaround let's prefix all strings with invisible space.
+    local prefix = string.char(0xE2) .. string.char(0x80) .. string.char(0x8B)
+
+    local delim_row = prefix .. '+'
+    for j = 1,num_cols do
+        delim_row = delim_row .. string.rep('-', widths[j]) .. '+'
+    end
+
+    -- format string - cut or fill with spaces to make is exactly n symbols.
+    -- also replace spaces with non-break spaces.
+    local fmt_str = function(x, n)
+        if not x then x = '' end
+        local str
+        if x:len() <= n then
+            local add = n - x:len()
+            local addl = math.floor(add/2)
+            local addr = math.ceil(add/2)
+            str = string.rep(' ', addl) .. x .. string.rep(' ', addr)
+        else
+            str = x:sub(1, n)
+        end
+        return str:gsub("%s",string.char(0xC2) .. string.char(0xA0))
+    end
+
+    local res = {}
+
+    -- insert into res a string with formatted row.
+    local res_insert = function(row)
+        local str_row = prefix .. '|'
+        for j = 1,num_cols do
+            str_row = str_row .. fmt_str(row[j], widths[j]) .. '|'
+        end
+        table.insert(res, str_row)
+    end
+
+    -- format result
+    table.insert(res, delim_row)
+    res_insert(names)
+    table.insert(res, delim_row)
+    for i = 1,num_rows do
+        res_insert(tab[i])
+    end
+    table.insert(res, delim_row)
+    return res
+end
 -- Lua 5.2 compatibility
 base_index_mt.__len = base_index_mt.len
 -- min and max
@@ -1696,6 +1797,10 @@ end
 space_mt.select = function(space, key, opts)
     check_space_arg(space, 'select')
     return check_primary_index(space):select(key, opts)
+end
+space_mt.fselect = function(space, key, opts)
+    check_space_arg(space, 'select')
+    return check_primary_index(space):fselect(key, opts)
 end
 space_mt.insert = function(space, tuple)
     check_space_arg(space, 'insert')
