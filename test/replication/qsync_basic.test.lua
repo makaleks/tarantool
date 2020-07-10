@@ -13,6 +13,11 @@ s1:select{}
 s2 = box.schema.create_space('test2')
 s2.is_sync
 
+--
+-- gh-4849: clear synchro queue with unconfigured box
+--
+box.ctl.clear_synchro_queue()
+
 -- Net.box takes sync into account.
 box.schema.user.grant('guest', 'super')
 netbox = require('net.box')
@@ -247,6 +252,51 @@ test_run:cmd('switch default')
 for i = 1, 100 do box.space.sync:delete{i} end
 test_run:cmd('switch replica')
 box.space.sync:count()
+
+--
+-- gh-4849: clear synchro queue on a master
+--
+test_run:switch('default')
+box.cfg{replication_synchro_quorum = 3, replication_synchro_timeout = 1000}
+ok, err = nil
+f = fiber.create(function()							\
+    ok, err = pcall(box.space.sync.insert, box.space.sync, {10})		\
+end)
+f:status()
+test_run:switch('replica')
+test_run:wait_cond(function() return box.space.sync:get{10} ~= nil end)
+test_run:switch('default')
+box.cfg{replication_synchro_timeout = 0.1}
+box.ctl.clear_synchro_queue()
+test_run:switch('replica')
+test_run:wait_cond(function() return box.space.sync:get{10} == nil end)
+test_run:switch('default')
+test_run:wait_cond(function() return f:status() == 'dead' end)
+ok, err
+test_run:wait_cond(function() return box.space.sync:get{10} == nil end)
+
+--
+-- gh-4849: clear synchro queue on a replica, make sure no crashes
+--
+test_run:switch('default')
+box.cfg{replication_synchro_quorum = 3, replication_synchro_timeout = 1000}
+ok, err = nil
+f = fiber.create(function()                                                     \
+    ok, err = pcall(box.space.sync.insert, box.space.sync, {9})                 \
+end)
+f.status()
+test_run:wait_cond(function() return box.space.sync:get{9} ~= nil end)
+test_run:switch('replica')
+box.cfg{replication_synchro_quorum = 3, replication_synchro_timeout=0.01}
+box.ctl.clear_synchro_queue()
+test_run:wait_cond(function() return box.space.sync:get{9} == nil end)
+test_run:switch('default')
+box.cfg{replication_synchro_timeout=0.01}
+test_run:wait_cond(function() return f:status() == 'dead' end)
+ok, err
+test_run:wait_cond(function() return box.space.sync:get{9} == nil end)
+
+-- Note: cluster may be in a broken state here due to nature of previous test.
 
 -- Cleanup.
 test_run:cmd('switch default')
