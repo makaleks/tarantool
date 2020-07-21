@@ -416,6 +416,60 @@ xrow_upsert_execute(const char *expr,const char *expr_end,
 	return xrow_update_finish(&update, format, p_tuple_len);
 }
 
+/** Return true if value stored in @a arith_op satisfy format requirements. */
+static bool
+update_arith_op_does_satisfy_format(struct xrow_update_op *arith_op,
+				    struct tuple_format *format)
+{
+	/*
+	 * Upsert's tuple may contain more tuples than specified in
+	 * space's format. In this case they are assumed to be unsigned.
+	 */
+	enum field_type fld_type = FIELD_TYPE_UNSIGNED;
+	if (arith_op->field_no < 0 ||
+	    (uint32_t) arith_op->field_no < tuple_format_field_count(format)) {
+		struct tuple_field *fld =
+			tuple_format_field(format, arith_op->field_no);
+		assert(fld != NULL);
+		fld_type = fld->type;
+	}
+	struct xrow_update_arg_arith arith = arith_op->arg.arith;
+	if (fld_type == FIELD_TYPE_UNSIGNED) {
+		if (arith.type == XUPDATE_TYPE_INT) {
+			if (!int96_is_uint64(&arith.int96))
+				return false;
+			return true;
+		}
+		/* Can't store decimals/floating points in unsigned field. */
+		return false;
+	}
+	if (fld_type == FIELD_TYPE_INTEGER) {
+		if (arith.type == XUPDATE_TYPE_INT)
+			return true;
+		return false;
+	}
+	if (fld_type == FIELD_TYPE_DOUBLE) {
+		if (arith.type == XUPDATE_TYPE_FLOAT ||
+		    arith.type == XUPDATE_TYPE_DOUBLE)
+			return true;
+		return false;
+	}
+	if (fld_type == FIELD_TYPE_NUMBER || fld_type == FIELD_TYPE_SCALAR) {
+		if (arith.type != XUPDATE_TYPE_DECIMAL)
+			return true;
+		return false;
+	}
+	if (fld_type == FIELD_TYPE_DECIMAL) {
+		if (arith.type == XUPDATE_TYPE_DECIMAL)
+			return true;
+		return false;
+	}
+	if (fld_type == FIELD_TYPE_ANY)
+		return true;
+	/* All other field types are not compatible with numerics. */
+	return false;
+}
+
 const char *
 xrow_upsert_squash(const char *expr1, const char *expr1_end,
 		   const char *expr2, const char *expr2_end,
@@ -534,6 +588,13 @@ xrow_upsert_squash(const char *expr1, const char *expr1_end,
 		struct xrow_update_op res;
 		if (xrow_update_arith_make(op[1], arith,
 					   &res.arg.arith) != 0)
+			return NULL;
+		res.field_no = op[0]->field_no;
+		/*
+		 * Do not squash operations if they don't satisfy
+		 * format.
+		 */
+		if (!update_arith_op_does_satisfy_format(&res, format))
 			return NULL;
 		res_ops = mp_encode_array(res_ops, 3);
 		res_ops = mp_encode_str(res_ops,

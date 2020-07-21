@@ -39,38 +39,217 @@
 #include "column_mask.h"
 
 /**
- * Try to squash two upsert series (msgspacked index_base + ops)
- * Try to create a tuple with squahed operations
- *
- * @retval 0 && *result_stmt != NULL : successful squash
- * @retval 0 && *result_stmt == NULL : unsquashable sources
- * @retval -1 - memory error
+ * Check that key hasn't been changed after applying upsert operation.
  */
+static bool
+vy_apply_result_does_cross_pk(struct tuple *old_stmt, const char *result,
+			      const char *result_end, struct key_def *cmp_def,
+			      uint64_t col_mask)
+{
+	if (!key_update_can_be_skipped(cmp_def->column_mask, col_mask)) {
+		struct tuple *tuple =
+			vy_stmt_new_replace(tuple_format(old_stmt), result,
+					    result_end);
+		int cmp_res = vy_stmt_compare(old_stmt, HINT_NONE, tuple,
+					      HINT_NONE, cmp_def);
+		tuple_unref(tuple);
+		return cmp_res != 0;
+	}
+	return false;
+}
+
+/**
+ * Apply update operations stored in @a upsert on tuple @a stmt. If @a stmt is
+ * void statement (i.e. it is NULL or delete statement) then operations are
+ * applied on tuple stored in @a upsert. Update operations of @a upsert which
+ * can't be applied are skipped along side with other operations from single
+ * group (i.e. packed in one msgpack array); errors may be logged depending on
+ * @a suppress_error flag.
+ *
+ * @param upsert Upsert statement to be applied on @a stmt.
+ * @param stmt Statement to be used as base for upsert operations.
+ * @param cmp_def Key definition required to provide check of primary key
+ *                modification.
+ * @return Tuple containing result of upsert application; NULL in case OOM.
+ */
+static struct tuple *
+vy_apply_upsert_on_terminal_stmt(struct tuple *upsert, struct tuple *stmt,
+				 struct key_def *cmp_def, bool suppress_error)
+{
+	assert(vy_stmt_type(upsert) == IPROTO_UPSERT);
+	assert(stmt == NULL || vy_stmt_type(stmt) != IPROTO_UPSERT);
+
+	uint32_t mp_size;
+	const char *new_ops = vy_stmt_upsert_ops(upsert, &mp_size);
+	/* Msgpack containing result of upserts application. */
+	const char *result_mp;
+	bool stmt_is_void = stmt == NULL || vy_stmt_type(stmt) == IPROTO_DELETE;
+	if (stmt_is_void)
+		result_mp = vy_upsert_data_range(upsert, &mp_size);
+	else
+		result_mp = tuple_data_range(stmt, &mp_size);
+	const char *result_mp_end = result_mp + mp_size;
+	/*
+	 * xrow_upsert_execute() allocates result using region,
+	 * so save starting point to release it later.
+	 */
+	struct region *region = &fiber()->gc;
+	size_t region_svp = region_used(region);
+	uint64_t column_mask = COLUMN_MASK_FULL;
+	struct tuple_format *format = tuple_format(upsert);
+
+	uint32_t ups_cnt = mp_decode_array(&new_ops);
+	const char *ups_ops = new_ops;
+	/*
+	 * In case upsert folds into insert, we must skip first
+	 * update operations.
+	 */
+	if (stmt_is_void) {
+		ups_cnt--;
+		mp_next(&ups_ops);
+	}
+	for (uint32_t i = 0; i < ups_cnt; ++i) {
+		assert(mp_typeof(*ups_ops) == MP_ARRAY);
+		const char *ups_ops_end = ups_ops;
+		mp_next(&ups_ops_end);
+		const char *exec_res = result_mp;
+		exec_res = xrow_upsert_execute(ups_ops, ups_ops_end, result_mp,
+					       result_mp_end, format, &mp_size,
+					       0, suppress_error, &column_mask);
+		if (exec_res == NULL) {
+			if (! suppress_error) {
+				struct error *e = diag_last_error(diag_get());
+				assert(e != NULL);
+				/* Bail out immediately in case of OOM. */
+				if (e->type != &type_ClientError) {
+					region_truncate(region, region_svp);
+					return NULL;
+				}
+				diag_log();
+			}
+			ups_ops = ups_ops_end;
+			continue;
+		}
+		/*
+		 * If it turns out that resulting tuple modifies primary
+		 * key, then simply ignore this upsert.
+		 */
+		if (vy_apply_result_does_cross_pk(stmt, exec_res,
+						  exec_res + mp_size, cmp_def,
+						  column_mask)) {
+			if (!suppress_error) {
+				say_error("upsert operations %s are not applied"\
+					  " due to primary key modification",
+					  mp_str(ups_ops));
+			}
+			ups_ops = ups_ops_end;
+			continue;
+		}
+		ups_ops = ups_ops_end;
+		/*
+		 * Result statement must satisfy space's format. Since upsert's
+		 * tuple correctness is already checked in vy_upsert(), let's
+		 * use its format to provide result verification.
+		 */
+		struct tuple_format *format = tuple_format(upsert);
+		if (tuple_validate_raw(format, exec_res) != 0) {
+			if (! suppress_error)
+				diag_log();
+			continue;
+		}
+		result_mp = exec_res;
+		result_mp_end = exec_res + mp_size;
+	}
+	struct tuple *new_terminal_stmt = vy_stmt_new_replace(format, result_mp,
+							      result_mp_end);
+	region_truncate(region, region_svp);
+	if (new_terminal_stmt == NULL)
+		return NULL;
+	vy_stmt_set_lsn(new_terminal_stmt, vy_stmt_lsn(upsert));
+	return new_terminal_stmt;
+}
+
+/**
+ * Unpack upsert's update operations from msgpack array
+ * into array of iovecs.
+ */
+static void
+upsert_ops_to_iovec(const char *ops, uint32_t ops_cnt, struct iovec *iov_arr)
+{
+	for (uint32_t i = 0; i < ops_cnt; ++i) {
+		assert(mp_typeof(*ops) == MP_ARRAY);
+		iov_arr[i].iov_base = (char *) ops;
+		mp_next(&ops);
+		iov_arr[i].iov_len = ops - (char *) iov_arr[i].iov_base;
+	}
+}
+
+/**
+ * Attempt at squashing arithmetic operations applied on the same tuple
+ * fields. We never squash first member (i.e. operations from the oldest
+ * upsert) from old operations, since it must be skipped in case such
+ * upsert turns into insert.
+ * Also note that content of @a new_ops and @a old_ops arrays can be modified
+ * as a result of function invocation.
+ * Array containing resulting operations is allocated using region.
+ * In case of OOM function returns -1; 0 otherwise.
+ * */
 static int
 vy_upsert_try_to_squash(struct tuple_format *format,
-			const char *key_mp, const char *key_mp_end,
-			const char *old_serie, const char *old_serie_end,
-			const char *new_serie, const char *new_serie_end,
-			struct tuple **result_stmt)
+			struct iovec *new_ops, uint32_t new_ops_cnt,
+			struct iovec *old_ops, uint32_t old_ops_cnt,
+			struct iovec **res_ops, uint32_t *res_ops_cnt)
 {
-	*result_stmt = NULL;
-
-	size_t squashed_size;
-	const char *squashed =
-		xrow_upsert_squash(old_serie, old_serie_end,
-				   new_serie, new_serie_end, format,
-				   &squashed_size);
-	if (squashed == NULL)
+	uint32_t squashed_ops = 0;
+	for (uint32_t i = 0; i < new_ops_cnt; ++i) {
+		const char *new = (const char *) new_ops[i].iov_base;
+		const char *new_end = new + new_ops[i].iov_len;
+		/*
+		 * Don't touch first update operation since it should
+		 * be skipped in case first upsert folds into insert.
+		 */
+		for (uint32_t j = 1; j < old_ops_cnt; ++j) {
+			const char *old =
+				(const char *) old_ops[j].iov_base;
+			const char *old_end =
+				(const char *) old + old_ops[j].iov_len;
+			/* Operation may already be squashed. */
+			if (old == NULL)
+				continue;
+			size_t squashed_size;
+			const char *res =
+				xrow_upsert_squash(old, old_end, new, new_end,
+						   format, &squashed_size);
+			if (res != NULL) {
+				new_ops[i].iov_base = (char *) res;
+				new_ops[i].iov_len = squashed_size;
+				old_ops[j].iov_base = NULL;
+				old_ops[j].iov_len = 0;
+				squashed_ops++;
+			}
+		}
+	}
+	*res_ops_cnt = new_ops_cnt + old_ops_cnt - squashed_ops;
+	if (squashed_ops == 0) {
+		*res_ops = old_ops;
 		return 0;
-	/* Successful squash! */
-	struct iovec operations[1];
-	operations[0].iov_base = (void *)squashed;
-	operations[0].iov_len = squashed_size;
-
-	*result_stmt = vy_stmt_new_upsert(format, key_mp, key_mp_end,
-					  operations, 1);
-	if (*result_stmt == NULL)
+	}
+	size_t ops_size;
+	*res_ops = region_alloc_array(&fiber()->gc, typeof(*res_ops[0]),
+				      *res_ops_cnt, &ops_size);
+	if (*res_ops == NULL) {
+		diag_set(OutOfMemory, ops_size, "region_alloc_array",
+			 "res_ops");
 		return -1;
+	}
+	/* Fill gaps (i.e. old squashed operations) in the resulting array. */
+	for (uint32_t i = 0; i < old_ops_cnt; ++i) {
+		if (old_ops[i].iov_base != NULL)
+			(*res_ops)[i] = old_ops[i];
+	}
+	for (uint32_t i = old_ops_cnt - squashed_ops, j = 0; j < new_ops_cnt;
+	     ++i, ++j)
+		(*res_ops)[i] = new_ops[j];
 	return 0;
 }
 
@@ -87,122 +266,69 @@ vy_apply_upsert(struct tuple *new_stmt, struct tuple *old_stmt,
 	assert(new_stmt != old_stmt);
 	assert(vy_stmt_type(new_stmt) == IPROTO_UPSERT);
 
-	if (old_stmt == NULL || vy_stmt_type(old_stmt) == IPROTO_DELETE) {
-		/*
-		 * INSERT case: return new stmt.
-		 */
-		return vy_stmt_replace_from_upsert(new_stmt);
+	struct tuple *result_stmt = NULL;
+	if (old_stmt == NULL || vy_stmt_type(old_stmt) != IPROTO_UPSERT) {
+		return vy_apply_upsert_on_terminal_stmt(new_stmt, old_stmt,
+						        cmp_def, suppress_error);
 	}
 
-	struct tuple_format *format = tuple_format(new_stmt);
-
+	assert(old_stmt != NULL);
+	assert(vy_stmt_type(old_stmt) == IPROTO_UPSERT);
 	/*
-	 * Unpack UPSERT operation from the new stmt
+	 * Unpack UPSERT operation from the old and new stmts.
 	 */
 	uint32_t mp_size;
-	const char *new_ops;
-	new_ops = vy_stmt_upsert_ops(new_stmt, &mp_size);
-	const char *new_ops_end = new_ops + mp_size;
-
+	const char *old_ops = vy_stmt_upsert_ops(old_stmt, &mp_size);
+	const char *old_stmt_mp = vy_upsert_data_range(old_stmt, &mp_size);
+	const char *old_stmt_mp_end = old_stmt_mp + mp_size;
+	const char *new_ops = vy_stmt_upsert_ops(new_stmt, &mp_size);
 	/*
-	 * Apply new operations to the old stmt
+	 * UPSERT + UPSERT case: try to squash arithmetic operations.
+	 * Firstly, unpack operations to iovec array.
 	 */
-	const char *result_mp;
-	if (vy_stmt_type(old_stmt) == IPROTO_UPSERT)
-		result_mp = vy_upsert_data_range(old_stmt, &mp_size);
-	else
-		result_mp = tuple_data_range(old_stmt, &mp_size);
-	const char *result_mp_end = result_mp + mp_size;
-	struct tuple *result_stmt = NULL;
+	struct tuple_format *format = tuple_format(old_stmt);
 	struct region *region = &fiber()->gc;
 	size_t region_svp = region_used(region);
-	uint8_t old_type = vy_stmt_type(old_stmt);
-	uint64_t column_mask = COLUMN_MASK_FULL;
-	result_mp = xrow_upsert_execute(new_ops, new_ops_end, result_mp,
-					result_mp_end, format, &mp_size,
-					0, suppress_error, &column_mask);
-	if (result_mp == NULL) {
+	uint32_t old_ops_cnt = mp_decode_array(&old_ops);
+	uint32_t new_ops_cnt = mp_decode_array(&new_ops);
+	size_t ops_size;
+	struct iovec *operations =
+		region_alloc_array(region, typeof(operations[0]),
+				   old_ops_cnt + new_ops_cnt, &ops_size);
+	if (operations == NULL) {
+		region_truncate(region, region_svp);
+		diag_set(OutOfMemory, ops_size, "region_alloc_array",
+			 "operations");
+		return NULL;
+	}
+	upsert_ops_to_iovec(old_ops, old_ops_cnt, operations);
+	upsert_ops_to_iovec(new_ops, new_ops_cnt, &operations[old_ops_cnt]);
+	struct iovec *res_ops = NULL;
+	uint32_t res_ops_cnt = 0;
+	if (vy_upsert_try_to_squash(format, &operations[old_ops_cnt],
+				    new_ops_cnt, operations, old_ops_cnt,
+				    &res_ops, &res_ops_cnt) != 0) {
+		/* OOM */
 		region_truncate(region, region_svp);
 		return NULL;
 	}
-	result_mp_end = result_mp + mp_size;
-	if (old_type != IPROTO_UPSERT) {
-		assert(old_type == IPROTO_INSERT ||
-		       old_type == IPROTO_REPLACE);
-		/*
-		 * UPDATE case: return the updated old stmt.
-		 */
-		result_stmt = vy_stmt_new_replace(format, result_mp,
-						  result_mp_end);
-		region_truncate(region, region_svp);
-		if (result_stmt == NULL)
-			return NULL; /* OOM */
-		vy_stmt_set_lsn(result_stmt, vy_stmt_lsn(new_stmt));
-		goto check_key;
-	}
-
+	assert(res_ops_cnt > 0);
+	assert(res_ops != NULL);
 	/*
-	 * Unpack UPSERT operation from the old stmt
+	 * Adding update operations. We keep order of update operations in
+	 * the array the same. It is vital since first set of operations
+	 * must be skipped in case upsert folds into insert. For instance:
+	 * old_ops = {{{op1}, {op2}}, {{op3}}}
+	 * new_ops = {{{op4}, {op5}}}
+	 * res_ops = {{{op1}, {op2}}, {{op3}}, {{op4}, {op5}}}
+	 * If upsert corresponding to old_ops becomes insert, then
+	 * {{op1}, {op2}} update operations are not applied.
 	 */
-	assert(old_stmt != NULL);
-	const char *old_ops;
-	old_ops = vy_stmt_upsert_ops(old_stmt, &mp_size);
-	const char *old_ops_end = old_ops + mp_size;
-	assert(old_ops_end > old_ops);
-
-	/*
-	 * UPSERT + UPSERT case: combine operations
-	 */
-	assert(old_ops_end - old_ops > 0);
-	if (vy_upsert_try_to_squash(format, result_mp, result_mp_end,
-				    old_ops, old_ops_end, new_ops, new_ops_end,
-				    &result_stmt) != 0) {
-		region_truncate(region, region_svp);
-		return NULL;
-	}
-	if (result_stmt != NULL) {
-		region_truncate(region, region_svp);
-		vy_stmt_set_lsn(result_stmt, vy_stmt_lsn(new_stmt));
-		goto check_key;
-	}
-
-	/* Failed to squash, simply add one upsert to another */
-	int old_ops_cnt, new_ops_cnt;
-	struct iovec operations[3];
-
-	old_ops_cnt = mp_decode_array(&old_ops);
-	operations[1].iov_base = (void *)old_ops;
-	operations[1].iov_len = old_ops_end - old_ops;
-
-	new_ops_cnt = mp_decode_array(&new_ops);
-	operations[2].iov_base = (void *)new_ops;
-	operations[2].iov_len = new_ops_end - new_ops;
-
-	char ops_buf[16];
-	char *header = mp_encode_array(ops_buf, old_ops_cnt + new_ops_cnt);
-	operations[0].iov_base = (void *)ops_buf;
-	operations[0].iov_len = header - ops_buf;
-
-	result_stmt = vy_stmt_new_upsert(format, result_mp, result_mp_end,
-					 operations, 3);
+	result_stmt = vy_stmt_new_upsert(format, old_stmt_mp, old_stmt_mp_end,
+					 res_ops, res_ops_cnt, false);
 	region_truncate(region, region_svp);
 	if (result_stmt == NULL)
 		return NULL;
 	vy_stmt_set_lsn(result_stmt, vy_stmt_lsn(new_stmt));
-
-check_key:
-	/*
-	 * Check that key hasn't been changed after applying operations.
-	 */
-	if (!key_update_can_be_skipped(cmp_def->column_mask, column_mask) &&
-	    vy_stmt_compare(old_stmt, HINT_NONE, result_stmt,
-			    HINT_NONE, cmp_def) != 0) {
-		/*
-		 * Key has been changed: ignore this UPSERT and
-		 * @retval the old stmt.
-		 */
-		tuple_unref(result_stmt);
-		result_stmt = vy_stmt_dup(old_stmt);
-	}
 	return result_stmt;
 }

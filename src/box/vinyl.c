@@ -1984,7 +1984,7 @@ vy_lsm_upsert(struct vy_tx *tx, struct vy_lsm *lsm,
 	operations[0].iov_base = (void *)expr;
 	operations[0].iov_len = expr_end - expr;
 	vystmt = vy_stmt_new_upsert(lsm->mem_format, tuple, tuple_end,
-				    operations, 1);
+				    operations, 1, false);
 	if (vystmt == NULL)
 		return -1;
 	assert(vy_stmt_type(vystmt) == IPROTO_UPSERT);

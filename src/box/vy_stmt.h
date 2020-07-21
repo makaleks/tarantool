@@ -528,6 +528,8 @@ vy_stmt_new_delete(struct tuple_format *format, const char *tuple_begin,
  * @param part_count Part count from key definition.
  * @param operations Vector of update operations.
  * @param ops_cnt Length of the update operations vector.
+ * @param is_ops_encoded True, if update operations are already packed
+  *                      into extra msgpack array.
  *
  * @retval NULL     Memory allocation error.
  * @retval not NULL Success.
@@ -535,7 +537,8 @@ vy_stmt_new_delete(struct tuple_format *format, const char *tuple_begin,
 struct tuple *
 vy_stmt_new_upsert(struct tuple_format *format,
 		   const char *tuple_begin, const char *tuple_end,
-		   struct iovec *operations, uint32_t ops_cnt);
+		   struct iovec *operations, uint32_t ops_cnt,
+		   bool is_ops_encoded);
 
 /**
  * Create REPLACE statement from UPSERT statement.

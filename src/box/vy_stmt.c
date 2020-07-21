@@ -313,16 +313,22 @@ vy_key_dup(const char *key)
 static struct tuple *
 vy_stmt_new_with_ops(struct tuple_format *format, const char *tuple_begin,
 		     const char *tuple_end, struct iovec *ops,
-		     int op_count, enum iproto_type type)
+		     int op_count, enum iproto_type type, bool is_ops_encoded)
 {
 	mp_tuple_assert(tuple_begin, tuple_end);
 
 	const char *tmp = tuple_begin;
 	mp_decode_array(&tmp);
 
+	/*
+	 * ops are grouped in one extra array.
+	 * See vy_apply_upsert() for details.
+	 */
 	size_t ops_size = 0;
 	for (int i = 0; i < op_count; ++i)
 		ops_size += ops[i].iov_len;
+	if (!is_ops_encoded)
+		ops_size += mp_sizeof_array(op_count);
 
 	struct tuple *stmt = NULL;
 	struct region *region = &fiber()->gc;
@@ -360,6 +366,8 @@ vy_stmt_new_with_ops(struct tuple_format *format, const char *tuple_begin,
 	field_map_build(&builder, wpos - field_map_size);
 	memcpy(wpos, tuple_begin, mpsize);
 	wpos += mpsize;
+	if (!is_ops_encoded)
+		wpos = mp_encode_array(wpos, op_count);
 	for (struct iovec *op = ops, *end = ops + op_count;
 	     op != end; ++op) {
 		memcpy(wpos, op->iov_base, op->iov_len);
@@ -374,10 +382,11 @@ end:
 struct tuple *
 vy_stmt_new_upsert(struct tuple_format *format, const char *tuple_begin,
 		   const char *tuple_end, struct iovec *operations,
-		   uint32_t ops_cnt)
+		   uint32_t ops_cnt, bool is_ops_encoded)
 {
 	return vy_stmt_new_with_ops(format, tuple_begin, tuple_end,
-				    operations, ops_cnt, IPROTO_UPSERT);
+				    operations, ops_cnt, IPROTO_UPSERT,
+				    is_ops_encoded);
 }
 
 struct tuple *
@@ -385,7 +394,7 @@ vy_stmt_new_replace(struct tuple_format *format, const char *tuple_begin,
 		    const char *tuple_end)
 {
 	return vy_stmt_new_with_ops(format, tuple_begin, tuple_end,
-				    NULL, 0, IPROTO_REPLACE);
+				    NULL, 0, IPROTO_REPLACE, true);
 }
 
 struct tuple *
@@ -393,7 +402,7 @@ vy_stmt_new_insert(struct tuple_format *format, const char *tuple_begin,
 		   const char *tuple_end)
 {
 	return vy_stmt_new_with_ops(format, tuple_begin, tuple_end,
-				    NULL, 0, IPROTO_INSERT);
+				    NULL, 0, IPROTO_INSERT, true);
 }
 
 struct tuple *
@@ -401,7 +410,7 @@ vy_stmt_new_delete(struct tuple_format *format, const char *tuple_begin,
 		   const char *tuple_end)
 {
 	return vy_stmt_new_with_ops(format, tuple_begin, tuple_end,
-				    NULL, 0, IPROTO_DELETE);
+				    NULL, 0, IPROTO_DELETE, true);
 }
 
 struct tuple *
@@ -735,19 +744,20 @@ vy_stmt_decode(struct xrow_header *xrow, struct tuple_format *format)
 		/* Always use key format for DELETE statements. */
 		stmt = vy_stmt_new_with_ops(env->key_format,
 					    request.key, request.key_end,
-					    NULL, 0, IPROTO_DELETE);
+					    NULL, 0, IPROTO_DELETE, true);
 		break;
 	case IPROTO_INSERT:
 	case IPROTO_REPLACE:
 		stmt = vy_stmt_new_with_ops(format, request.tuple,
 					    request.tuple_end,
-					    NULL, 0, request.type);
+					    NULL, 0, request.type, true);
 		break;
 	case IPROTO_UPSERT:
 		ops.iov_base = (char *)request.ops;
 		ops.iov_len = request.ops_end - request.ops;
 		stmt = vy_stmt_new_upsert(format, request.tuple,
-					  request.tuple_end, &ops, 1);
+					  request.tuple_end, &ops,
+					  1, true);
 		break;
 	default:
 		/* TODO: report filename. */

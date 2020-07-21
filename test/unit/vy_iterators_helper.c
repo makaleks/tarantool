@@ -112,7 +112,7 @@ vy_new_simple_stmt(struct tuple_format *format, struct key_def *key_def,
 			ops = mp_encode_int(ops, templ->upsert_value);
 		operations[0].iov_base = tmp;
 		operations[0].iov_len = ops - tmp;
-		ret = vy_stmt_new_upsert(format, buf, pos, operations, 1);
+		ret = vy_stmt_new_upsert(format, buf, pos, operations, 1, true);
 		fail_if(ret == NULL);
 		break;
 	}
