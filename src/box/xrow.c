@@ -893,51 +893,57 @@ xrow_encode_dml(const struct request *request, struct region *region,
 	return iovcnt;
 }
 
-static int
-xrow_encode_confirm_rollback(struct xrow_header *row, struct region *region,
-			     uint32_t replica_id, int64_t lsn, int type)
+void
+xrow_encode_synchro(struct xrow_header *row,
+		    struct synchro_body_bin *body,
+		    uint32_t replica_id, int64_t lsn,
+		    int type)
 {
-	size_t len = mp_sizeof_map(2) + mp_sizeof_uint(IPROTO_REPLICA_ID) +
-		     mp_sizeof_uint(replica_id) + mp_sizeof_uint(IPROTO_LSN) +
-		     mp_sizeof_uint(lsn);
-	char *buf = (char *)region_alloc(region, len);
-	if (buf == NULL) {
-		diag_set(OutOfMemory, len, "region_alloc", "buf");
-		return -1;
-	}
-	char *pos = buf;
-
-	pos = mp_encode_map(pos, 2);
-	pos = mp_encode_uint(pos, IPROTO_REPLICA_ID);
-	pos = mp_encode_uint(pos, replica_id);
-	pos = mp_encode_uint(pos, IPROTO_LSN);
-	pos = mp_encode_uint(pos, lsn);
+	/*
+	 * A map with two elements. We don't compress
+	 * numbers to have this structure constant in size,
+	 * which will allow us to preallocate it on stack.
+	 */
+	body->m_body = 0x80 | 2;
+	body->k_replica_id = IPROTO_REPLICA_ID;
+	body->m_replica_id = 0xce;
+	body->v_replica_id = mp_bswap_u32(replica_id);
+	body->k_lsn = IPROTO_LSN;
+	body->m_lsn = 0xcf;
+	body->v_lsn = mp_bswap_u64(lsn);
 
 	memset(row, 0, sizeof(*row));
 
-	row->body[0].iov_base = buf;
-	row->body[0].iov_len = len;
-	row->bodycnt = 1;
-
 	row->type = type;
-
-	return 0;
+	row->body[0].iov_base = (void *)body;
+	row->body[0].iov_len = sizeof(*body);
+	row->bodycnt = 1;
 }
 
 int
 xrow_encode_confirm(struct xrow_header *row, struct region *region,
 		    uint32_t replica_id, int64_t lsn)
 {
-	return xrow_encode_confirm_rollback(row, region, replica_id, lsn,
-					    IPROTO_CONFIRM);
+	struct synchro_body_bin *body = region_alloc(region, sizeof(*body));
+	if (body == NULL) {
+		diag_set(OutOfMemory, sizeof(*body), "region_alloc", "body");
+		return -1;
+	}
+	xrow_encode_synchro(row, body, replica_id, lsn, IPROTO_CONFIRM);
+	return 0;
 }
 
 int
 xrow_encode_rollback(struct xrow_header *row, struct region *region,
 		     uint32_t replica_id, int64_t lsn)
 {
-	return xrow_encode_confirm_rollback(row, region, replica_id, lsn,
-					    IPROTO_ROLLBACK);
+	struct synchro_body_bin *body = region_alloc(region, sizeof(*body));
+	if (body == NULL) {
+		diag_set(OutOfMemory, sizeof(*body), "region_alloc", "body");
+		return -1;
+	}
+	xrow_encode_synchro(row, body, replica_id, lsn, IPROTO_ROLLBACK);
+	return 0;
 }
 
 static int

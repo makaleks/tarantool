@@ -215,6 +215,31 @@ int
 xrow_encode_dml(const struct request *request, struct region *region,
 		struct iovec *iov);
 
+/** Synchro request xrow's body in MsgPack format. */
+struct PACKED synchro_body_bin {
+	uint8_t m_body;
+	uint8_t k_replica_id;
+	uint8_t m_replica_id;
+	uint32_t v_replica_id;
+	uint8_t k_lsn;
+	uint8_t m_lsn;
+	uint64_t v_lsn;
+};
+
+/**
+ * Encode synchro request body into the xrow.
+ * @param xrow Destination xrow.
+ * @param body Destination body.
+ * @param replica_id Master's instance id.
+ * @param lsn Last confirmed lsn.
+ * @param type Request type.
+ */
+void
+xrow_encode_synchro(struct xrow_header *row,
+		    struct synchro_body_bin *body,
+		    uint32_t replica_id, int64_t lsn,
+		    int type);
+
 /**
  * Encode the CONFIRM to row body and set row type to
  * IPROTO_CONFIRM.
