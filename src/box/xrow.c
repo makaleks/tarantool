@@ -920,32 +920,6 @@ xrow_encode_synchro(struct xrow_header *row,
 	row->bodycnt = 1;
 }
 
-int
-xrow_encode_confirm(struct xrow_header *row, struct region *region,
-		    uint32_t replica_id, int64_t lsn)
-{
-	struct synchro_body_bin *body = region_alloc(region, sizeof(*body));
-	if (body == NULL) {
-		diag_set(OutOfMemory, sizeof(*body), "region_alloc", "body");
-		return -1;
-	}
-	xrow_encode_synchro(row, body, replica_id, lsn, IPROTO_CONFIRM);
-	return 0;
-}
-
-int
-xrow_encode_rollback(struct xrow_header *row, struct region *region,
-		     uint32_t replica_id, int64_t lsn)
-{
-	struct synchro_body_bin *body = region_alloc(region, sizeof(*body));
-	if (body == NULL) {
-		diag_set(OutOfMemory, sizeof(*body), "region_alloc", "body");
-		return -1;
-	}
-	xrow_encode_synchro(row, body, replica_id, lsn, IPROTO_ROLLBACK);
-	return 0;
-}
-
 static int
 xrow_decode_confirm_rollback(struct xrow_header *row, uint32_t *replica_id,
 			     int64_t *lsn)
