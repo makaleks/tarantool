@@ -181,6 +181,8 @@ cmd ::= ROLLBACK TO savepoint_opt nm(X). {
 cmd ::= create_table create_table_args with_opts create_table_end.
 create_table ::= createkw TABLE ifnotexists(E) nm(Y). {
   create_table_def_init(&pParse->create_table_def, &Y, E);
+  create_checks_def_init(&pParse->checks_def);
+  create_fkeys_def_init(&pParse->fkeys_def);
   pParse->create_table_def.new_space = sqlStartTable(pParse, &Y);
   pParse->initiateTTrans = true;
 }

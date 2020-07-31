@@ -200,6 +200,7 @@ sql_parser_create(struct Parse *parser, struct sql *db, uint32_t sql_flags)
 	parser->sql_flags = sql_flags;
 	parser->line_count = 1;
 	parser->line_pos = 1;
+	parser->has_autoinc = false;
 	region_create(&parser->region, &cord()->slabc);
 }
 
@@ -211,7 +212,7 @@ sql_parser_destroy(Parse *parser)
 	sql *db = parser->db;
 	sqlDbFree(db, parser->aLabel);
 	sql_expr_list_delete(db, parser->pConstExpr);
-	create_table_def_destroy(&parser->create_table_def);
+	fkeys_def_destroy(&parser->fkeys_def);
 	if (db != NULL) {
 		assert(db->lookaside.bDisable >=
 		       parser->disableLookaside);
