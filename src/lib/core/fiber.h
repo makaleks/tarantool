@@ -386,6 +386,107 @@ struct slab_cache;
 API_EXPORT struct slab_cache *
 cord_slab_cache(void);
 
+/**
+ * box region allocator
+ *
+ * It is the region allocator from the small library. It is useful
+ * for allocating tons of small objects and free them at once.
+ *
+ * Typical usage is illustrated in the sketch below.
+ *
+ *  | size_t region_svp = box_region_used();
+ *  | while (<...>) {
+ *  |     char *buf = box_region_alloc(<...>);
+ *  |     <...>
+ *  | }
+ *  | box_region_truncate(region_svp);
+ *
+ * There are module API functions that return a result on
+ * this region. In this case a module is responsible to free the
+ * result:
+ *
+ *  | size_t region_svp = box_region_used();
+ *  | char *buf = box_<...>(<...>);
+ *  | <...>
+ *  | box_region_truncate(region_svp);
+ *
+ * This API provides better compatibility guarantees over using
+ * the small library directly in a module. A binary layout of
+ * internal structures may be changed in a future, but
+ * <box_region_*>() functions will remain API and ABI compatible.
+ *
+ * Data allocated on the region are guaranteed to be valid until
+ * a fiber yield or a call of a function from the certain set:
+ *
+ * - Related to transactions.
+ * - Ones that may cause box initialization (box.cfg()).
+ * - Ones that may involve SQL execution.
+ *
+ * FIXME: Provide more strict list of functions, which may
+ * invalidate the data: ones that may lead to calling of
+ * fiber_gc().
+ *
+ * It is safe to call simple box APIs around tuples, key_defs and
+ * so on -- they don't invalidate the allocated data.
+ *
+ * Don't assume this region as fiber local. This is an
+ * implementation detail and may be changed in a future.
+ *
+ * Another useful property is that data allocated on this region
+ * are freed eventually, so a cold path may omit
+ * <box_region_truncate>() call: it will not lead to a memory
+ * leak. It is not recommended to exploit this property on a hot
+ * path, because of the risk to exhaust available memory for this
+ * region before it'll be freed.
+ *
+ * @sa <fiber_gc>() (internal function)
+ */
+
+/** How much memory is used by the box region. */
+API_EXPORT size_t
+box_region_used(void);
+
+/** Allocate size bytes from the box region. */
+API_EXPORT void *
+box_region_alloc(size_t size);
+
+/**
+ * Allocate size bytes from the box region with given alingment.
+ */
+API_EXPORT void *
+box_region_aligned_alloc(size_t size, size_t alignment);
+
+/*
+ * Allocate storage for an object of given type with respect to
+ * its alignment.
+ *
+ * @param T    type of an object
+ * @param size where to store size of an object (size_t *)
+ */
+#define box_region_alloc_object(T, size) ({					\
+	*(size) = sizeof(T);							\
+	(T *)box_region_aligned_alloc(sizeof(T), alignof(T));			\
+})
+
+/*
+ * Allocate storage for array of objects of given type.
+ *
+ * @param T     type of an object
+ * @param count amount of objects to allocate (size_t)
+ * @param size  where to store size of an object (size_t *)
+ */
+#define box_region_alloc_array(T, count, size) ({				\
+	int _tmp_ = sizeof(T) * (count);					\
+	*(size) = _tmp_;							\
+	(T *)box_region_aligned_alloc(_tmp_, alignof(T));			\
+})
+
+/**
+ * Truncate the box region to the given size.
+ */
+void
+box_region_truncate(size_t size);
+
 /** \endcond public */
 
 /**
