@@ -419,20 +419,19 @@ xrow_upsert_execute(const char *expr,const char *expr_end,
 const char *
 xrow_upsert_squash(const char *expr1, const char *expr1_end,
 		   const char *expr2, const char *expr2_end,
-		   struct tuple_format *format, size_t *result_size,
-		   int index_base)
+		   struct tuple_format *format, size_t *result_size)
 {
 	const char *expr[2] = {expr1, expr2};
 	const char *expr_end[2] = {expr1_end, expr2_end};
 	struct xrow_update update[2];
 	struct tuple_dictionary *dict = format->dict;
 	for (int j = 0; j < 2; j++) {
-		xrow_update_init(&update[j], index_base);
+		xrow_update_init(&update[j], 0);
 		if (xrow_update_read_ops(&update[j], expr[j], expr_end[j],
 					 dict, 0) != 0)
 			return NULL;
 		mp_decode_array(&expr[j]);
-		int32_t prev_field_no = index_base - 1;
+		int32_t prev_field_no = -1;
 		for (uint32_t i = 0; i < update[j].op_count; i++) {
 			struct xrow_update_op *op = &update[j].ops[i];
 			if (op->opcode != '+' && op->opcode != '-' &&

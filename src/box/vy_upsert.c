@@ -59,7 +59,7 @@ vy_upsert_try_to_squash(struct tuple_format *format,
 	const char *squashed =
 		xrow_upsert_squash(old_serie, old_serie_end,
 				   new_serie, new_serie_end, format,
-				   &squashed_size, 0);
+				   &squashed_size);
 	if (squashed == NULL)
 		return 0;
 	/* Successful squash! */
