@@ -32,6 +32,9 @@
 #include "txn_limbo.h"
 #include "replication.h"
 
+#include "iproto_constants.h"
+#include "journal.h"
+
 struct txn_limbo txn_limbo;
 
 static inline void
@@ -271,61 +274,63 @@ complete:
 	return 0;
 }
 
+/**
+ * A callback for synchronous write: txn_limbo_write fiber
+ * waiting to proceed once a record is written to WAL.
+ */
 static void
-txn_limbo_write_confirm_rollback(struct txn_limbo *limbo, int64_t lsn,
-				 bool is_confirm)
+txn_limbo_write_cb(struct journal_entry *entry)
 {
+	assert(entry->complete_data != NULL);
+	fiber_wakeup(entry->complete_data);
+}
+
+/**
+ * Write CONFIRM or ROLLBACK message to a journal directly
+ * without involving transaction engine because using txn
+ * engine is far from being cheap while we only need to
+ * write a small journal entry.
+ */
+static void
+txn_limbo_write(uint32_t replica_id, int64_t lsn, int type)
+{
+	assert(replica_id != REPLICA_ID_NIL);
+	assert(type == IPROTO_CONFIRM || type == IPROTO_ROLLBACK);
 	assert(lsn > 0);
 
+	/*
+	 * When allocated statically some compilers (such as
+	 * clang + asan) requires the journal_entry::rows to
+	 * be last in a container structure. So it it simplier
+	 * just to create a cummulative buffer.
+	 */
+	char buf[sizeof(struct journal_entry) +
+		 sizeof(struct xrow_header *)];
+
+	struct synchro_body_bin body_bin;
 	struct xrow_header row;
-	struct request request = {
-		.header = &row,
-	};
 
-	struct txn *txn = txn_begin();
-	if (txn == NULL)
-		goto rollback;
+	struct journal_entry *entry = (struct journal_entry *)buf;
+	entry->rows[0] = &row;
 
-	int res = 0;
-	if (is_confirm) {
-		res = xrow_encode_confirm(&row, &txn->region,
-					  limbo->instance_id, lsn);
-	} else {
+	xrow_encode_synchro(&row, &body_bin, replica_id, lsn, type);
+
+	journal_entry_create(entry, 1, xrow_approx_len(&row),
+			     txn_limbo_write_cb, fiber());
+
+	if (journal_write(entry) != 0 || entry->res < 0) {
+		diag_set(ClientError, ER_WAL_IO);
+		diag_log();
 		/*
-		 * This LSN is the first to be rolled back, so
-		 * the last "safe" lsn is lsn - 1.
+		 * XXX: the stub is supposed to be removed once it is defined what to do
+		 * when a synchro request WAL write fails. One of the possible
+		 * solutions: log the error, keep the limbo queue as is and probably put
+		 * in rollback mode. Then provide a hook to call manually when WAL
+		 * problems are fixed. Or retry automatically with some period.
 		 */
-		res = xrow_encode_rollback(&row, &txn->region,
-					   limbo->instance_id, lsn);
+		panic("Could not write a synchro request to WAL: lsn = %lld, type = "
+		      "%s\n", lsn, type == IPROTO_CONFIRM ? "CONFIRM" : "ROLLBACK");
 	}
-	if (res == -1)
-		goto rollback;
-	/*
-	 * This is not really a transaction. It just uses txn API
-	 * to put the data into WAL. And obviously it should not
-	 * go to the limbo and block on the very same sync
-	 * transaction which it tries to confirm now.
-	 */
-	txn_set_flag(txn, TXN_FORCE_ASYNC);
-
-	if (txn_begin_stmt(txn, NULL) != 0)
-		goto rollback;
-	if (txn_commit_stmt(txn, &request) != 0)
-		goto rollback;
-	if (txn_commit(txn) != 0)
-		goto rollback;
-	return;
-
-rollback:
-	/*
-	 * XXX: the stub is supposed to be removed once it is defined what to do
-	 * when a synchro request WAL write fails. One of the possible
-	 * solutions: log the error, keep the limbo queue as is and probably put
-	 * in rollback mode. Then provide a hook to call manually when WAL
-	 * problems are fixed. Or retry automatically with some period.
-	 */
-	panic("Could not write a synchro request to WAL: lsn = %lld, type = "
-	      "%s\n", lsn, is_confirm ? "CONFIRM" : "ROLLBACK");
 }
 
 /**
@@ -338,7 +343,7 @@ txn_limbo_write_confirm(struct txn_limbo *limbo, int64_t lsn)
 	assert(lsn > limbo->confirmed_lsn);
 	assert(!limbo->is_in_rollback);
 	limbo->confirmed_lsn = lsn;
-	txn_limbo_write_confirm_rollback(limbo, lsn, true);
+	txn_limbo_write(limbo->instance_id, lsn, IPROTO_CONFIRM);
 }
 
 void
@@ -390,7 +395,7 @@ txn_limbo_write_rollback(struct txn_limbo *limbo, int64_t lsn)
 	assert(lsn > limbo->confirmed_lsn);
 	assert(!limbo->is_in_rollback);
 	limbo->is_in_rollback = true;
-	txn_limbo_write_confirm_rollback(limbo, lsn, false);
+	txn_limbo_write(limbo->instance_id, lsn, IPROTO_ROLLBACK);
 	limbo->is_in_rollback = false;
 }
 
