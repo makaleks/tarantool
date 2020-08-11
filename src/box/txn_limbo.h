@@ -233,6 +233,10 @@ txn_limbo_assign_lsn(struct txn_limbo *limbo, struct txn_limbo_entry *entry,
  */
 void
 txn_limbo_ack(struct txn_limbo *limbo, uint32_t replica_id, int64_t lsn);
+void
+txn_limbo_write_confirm(struct txn_limbo *limbo, int64_t lsn);
+void
+txn_limbo_write_rollback(struct txn_limbo *limbo, int64_t lsn);
 
 /**
  * Block the current fiber until the transaction in the limbo

@@ -181,9 +181,6 @@ txn_limbo_assign_lsn(struct txn_limbo *limbo, struct txn_limbo_entry *entry,
 		txn_limbo_assign_remote_lsn(limbo, entry, lsn);
 }
 
-static void
-txn_limbo_write_rollback(struct txn_limbo *limbo, int64_t lsn);
-
 int
 txn_limbo_wait_complete(struct txn_limbo *limbo, struct txn_limbo_entry *entry)
 {
@@ -337,7 +334,7 @@ txn_limbo_write(uint32_t replica_id, int64_t lsn, int type)
  * Write a confirmation entry to WAL. After it's written all the
  * transactions waiting for confirmation may be finished.
  */
-static void
+void
 txn_limbo_write_confirm(struct txn_limbo *limbo, int64_t lsn)
 {
 	assert(lsn > limbo->confirmed_lsn);
@@ -389,7 +386,7 @@ txn_limbo_read_confirm(struct txn_limbo *limbo, int64_t lsn)
  * transactions following the current one and waiting for
  * confirmation must be rolled back.
  */
-static void
+void
 txn_limbo_write_rollback(struct txn_limbo *limbo, int64_t lsn)
 {
 	assert(lsn > limbo->confirmed_lsn);

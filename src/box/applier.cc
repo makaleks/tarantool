@@ -282,6 +282,8 @@ process_confirm_rollback(struct request *request, bool is_confirm)
 	struct txn *txn = in_txn();
 	int64_t lsn = 0;
 
+	panic("process_confirm_rollback called");
+
 	int res = 0;
 	if (is_confirm)
 		res = xrow_decode_confirm(request->header, &replica_id, &lsn);
@@ -339,6 +341,164 @@ apply_row(struct xrow_header *row)
 		return -1;
 	}
 	return 0;
+}
+
+#include "txn_limbo.h"
+#include "journal.h"
+
+struct synchro_entry {
+	struct applier		*applier;
+	struct synchro_body_bin	body_bin;
+	struct xrow_header	row;
+	struct journal_entry	journal_entry;
+};
+
+static struct synchro_entry *
+synchro_entry_new(struct applier *applier, uint32_t replica_id,
+		  int64_t lsn, uint32_t type,
+		  journal_write_async_f write_async_cb)
+{
+	struct synchro_entry *entry;
+	size_t size = sizeof(*entry) +
+		sizeof(struct xrow_header *);
+
+	entry = (struct synchro_entry *)malloc(size);
+	if (entry == NULL) {
+		diag_set(OutOfMemory, size, "malloc",
+			 "synchro_entry");
+		return NULL;
+	}
+
+	struct journal_entry *journal_entry = &entry->journal_entry;
+	struct synchro_body_bin *body_bin = &entry->body_bin;
+	struct xrow_header *row = &entry->row;
+
+	entry->applier = applier;
+	journal_entry->rows[0] = row;
+
+	xrow_encode_synchro(row, body_bin, replica_id, lsn, type);
+	journal_entry_create(journal_entry, 1, xrow_approx_len(row),
+			     write_async_cb, entry);
+	return entry;
+}
+
+static void
+synchro_entry_delete(struct synchro_entry *entry)
+{
+	free(entry);
+}
+
+static void
+applier_signal_ack(struct applier *applier);
+
+static void
+apply_synchro_row_cb(struct journal_entry *entry)
+{
+	say_info("apply_synchro_row_cb res %d", entry->res);
+
+	assert(entry->complete_data != NULL);
+	struct synchro_entry *synchro_entry =
+		(struct synchro_entry *)entry->complete_data;
+	struct applier *applier = synchro_entry->applier;
+
+	if (entry->res < 0) {
+		// see applier_on_rollback
+		if (!diag_is_empty(&replicaset.applier.diag)) {
+			diag_set_error(&applier->diag,
+				       diag_last_error(&replicaset.applier.diag));
+		}
+
+		/* Stop the applier fiber. */
+		fiber_cancel(applier->reader);
+
+		vclock_copy(&replicaset.applier.vclock, &replicaset.vclock);
+		diag_set(ClientError, ER_WAL_IO);
+		diag_log();
+	} else {
+		applier_signal_ack(applier);
+	}
+	synchro_entry_delete(synchro_entry);
+}
+
+static struct latch *
+applier_lock(uint32_t replica_id)
+{
+	struct replica *replica = replica_by_id(replica_id);
+	struct latch *latch = (replica ? &replica->order_latch :
+			       &replicaset.applier.order_latch);
+	latch_lock(latch);
+	return latch;
+}
+
+static void
+applier_unlock(struct latch *latch)
+{
+	assert(latch != NULL);
+	latch_unlock(latch);
+}
+
+static int
+apply_synchro_row(struct applier *applier, struct xrow_header *row)
+{
+	assert(iproto_type_is_synchro_request(row->type));
+
+	say_info("apply_synchro_row: row->replica_id %u row->lsn %llu",
+		 row->replica_id, row->lsn);
+
+	struct latch *latch = applier_lock(row->replica_id);
+	if (vclock_get(&replicaset.applier.vclock, row->replica_id) >= row->lsn) {
+		/*
+		 * The row is too old, we already have seen it,
+		 * just ignore silently.
+		 */
+		applier_unlock(latch);
+		return 0;
+	}
+
+	uint32_t replica_id = -1;
+	int64_t lsn = -1;
+
+	if (row->type == IPROTO_CONFIRM) {
+		if (xrow_decode_confirm(row, &replica_id, &lsn) != 0)
+			goto out;
+	} else {
+		if (xrow_decode_rollback(row, &replica_id, &lsn) != 0)
+			goto out;
+	}
+
+	say_info("apply_synchro_row: replica_id %u lsn %llu",
+		 replica_id, lsn);
+
+	if (replica_id != txn_limbo.instance_id) {
+		diag_set(ClientError, ER_SYNC_MASTER_MISMATCH,
+			 replica_id, txn_limbo.instance_id);
+		goto out;
+	}
+
+	if (row->type == IPROTO_CONFIRM)
+		txn_limbo_read_confirm(&txn_limbo, lsn);
+	else
+		txn_limbo_read_rollback(&txn_limbo, lsn);
+
+	struct synchro_entry *entry;
+	entry = synchro_entry_new(applier, row->replica_id, row->lsn,
+				  row->type, apply_synchro_row_cb);
+	if (entry == NULL)
+		goto out;
+
+	if (journal_write_async(&entry->journal_entry) != 0) {
+		diag_set(ClientError, ER_WAL_IO);
+		goto out;
+	}
+
+	vclock_follow(&replicaset.applier.vclock, row->replica_id, row->lsn);
+	applier_unlock(latch);
+	return 0;
+
+out:
+	diag_log();
+	applier_unlock(latch);
+	return -1;
 }
 
 static int
@@ -940,7 +1100,6 @@ applier_apply_tx(struct stailq *rows)
 
 	if (txn_commit_async(txn) < 0)
 		goto fail;
-
 	/*
 	 * The transaction was sent to journal so promote vclock.
 	 *
@@ -964,7 +1123,7 @@ fail:
  * Notify the applier's write fiber that there are more ACKs to
  * send to master.
  */
-static inline void
+static void
 applier_signal_ack(struct applier *applier)
 {
 	fiber_cond_signal(&applier->writer_cond);
@@ -1134,19 +1293,43 @@ applier_subscribe(struct applier *applier)
 			applier_set_state(applier, APPLIER_FOLLOW);
 		}
 
+		struct applier_tx_row *atx_row;
 		struct stailq rows;
 		applier_read_tx(applier, &rows);
 
 		applier->last_row_time = ev_monotonic_now(loop());
-		/*
-		 * In case of an heartbeat message wake a writer up
-		 * and check applier state.
-		 */
+
+		atx_row = stailq_first_entry(&rows, struct applier_tx_row, next);
+		if (atx_row->row.lsn == 0) {
+			/*
+			 * In case of an heartbeat message wake a writer up
+			 * and check applier state.
+			 */
+			applier_signal_ack(applier);
+		} else if (iproto_type_is_synchro_request(atx_row->row.type)) {
+			/*
+			 * Make sure synchro messages are never reached
+			 * in a batch (this is by design for simplicity
+			 * sake).
+			 */
+			assert(stailq_first(&rows) == stailq_last(&rows));
+
+			/*
+			 * Synchro requests should eliminate txn
+			 * engine usage for performance sake.
+			 */
+			if (apply_synchro_row(applier, &atx_row->row) != 0)
+				diag_raise();
+		} else if (applier_apply_tx(&rows) != 0) {
+			diag_raise();
+		}
+#if 0
 		if (stailq_first_entry(&rows, struct applier_tx_row,
 				       next)->row.lsn == 0)
 			applier_signal_ack(applier);
 		else if (applier_apply_tx(&rows) != 0)
 			diag_raise();
+#endif
 
 		if (ibuf_used(ibuf) == 0)
 			ibuf_reset(ibuf);
