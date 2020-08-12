@@ -40,6 +40,8 @@
 #include "box/tuple.h"
 #include "box/tuple_format.h"
 #include "box/lua/tuple.h"
+#include "box/raft.h"
+#include "box/xrow.h"
 #include "mpstream/mpstream.h"
 
 static uint32_t CTID_STRUCT_TUPLE_FORMAT_PTR;
@@ -246,12 +248,45 @@ lbox_tuple_format_new(struct lua_State *L)
 
 /* }}} */
 
+static int
+lbox_raft_new_term(struct lua_State *L)
+{
+	uint64_t min_term = luaL_checkuint64(L, 1);
+	raft_new_term(min_term);
+	return 0;
+}
+
+static int
+lbox_raft_vote(struct lua_State *L)
+{
+	uint64_t vote_for = luaL_checkuint64(L, 1);
+	if (vote_for > UINT32_MAX)
+		return luaL_error(L, "Invalid vote");
+	raft_vote(vote_for);
+	return 0;
+}
+
+static int
+lbox_raft_get(struct lua_State *L)
+{
+	lua_createtable(L, 0, 2);
+	luaL_pushuint64(L, raft.term);
+	lua_setfield(L, -2, "term");
+	luaL_pushuint64(L, raft.vote);
+	lua_setfield(L, -2, "vote");
+	return 1;
+}
+
 void
 box_lua_misc_init(struct lua_State *L)
 {
 	static const struct luaL_Reg boxlib_internal[] = {
 		{"select", lbox_select},
 		{"new_tuple_format", lbox_tuple_format_new},
+		/* Temporary helpers to sanity test raft persistency. */
+		{"raft_new_term", lbox_raft_new_term},
+		{"raft_vote", lbox_raft_vote},
+		{"raft_get", lbox_raft_get},
 		{NULL, NULL}
 	};
 
