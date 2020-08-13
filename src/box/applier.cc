@@ -354,9 +354,9 @@ struct synchro_entry {
 };
 
 static struct synchro_entry *
-synchro_entry_new(struct applier *applier, uint32_t replica_id,
-		  int64_t lsn, uint32_t type,
-		  journal_write_async_f write_async_cb)
+synchro_entry_new(struct applier *applier, uint32_t replica_id, int64_t row_lsn,
+		  uint32_t synchro_replica_id, int64_t synchro_lsn,
+		  uint32_t synchro_type, journal_write_async_f write_async_cb)
 {
 	struct synchro_entry *entry;
 	size_t size = sizeof(*entry) +
@@ -376,7 +376,10 @@ synchro_entry_new(struct applier *applier, uint32_t replica_id,
 	entry->applier = applier;
 	journal_entry->rows[0] = row;
 
-	xrow_encode_synchro(row, body_bin, replica_id, lsn, type);
+	xrow_encode_synchro(row, body_bin, synchro_replica_id, synchro_lsn,
+			    synchro_type);
+	row->lsn = row_lsn;
+	row->replica_id = replica_id;
 	journal_entry_create(journal_entry, 1, xrow_approx_len(row),
 			     write_async_cb, entry);
 	return entry;
@@ -482,7 +485,8 @@ apply_synchro_row(struct applier *applier, struct xrow_header *row)
 
 	struct synchro_entry *entry;
 	entry = synchro_entry_new(applier, row->replica_id, row->lsn,
-				  row->type, apply_synchro_row_cb);
+				  replica_id, lsn, row->type,
+				  apply_synchro_row_cb);
 	if (entry == NULL)
 		goto out;
 
