@@ -600,6 +600,15 @@ local function stop()
         fio.unlink(pid_file)
         return 1
     end
+    fiber.sleep(1)
+    if fio.stat(pid_file) ~= nil then
+        log.info("Kill not terminated process %d", pid)
+        if ffi.C.kill(pid, 9) < 0 then
+            log.error("Can't kill process %d: %s", pid, errno.strerror())
+            fio.unlink(pid_file)
+            return 1
+        end
+    end
 
     return 0
 end
