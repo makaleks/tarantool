@@ -51,7 +51,7 @@ sio_socketname(int fd)
 {
 	/* Preserve errno */
 	int save_errno = errno;
-	int name_size = 2 * SERVICE_NAME_MAXLEN;
+	int name_size = 4 * SERVICE_NAME_MAXLEN;
 	char *name = static_alloc(name_size);
 	int n = snprintf(name, name_size, "fd %d", fd);
 	if (fd >= 0) {
