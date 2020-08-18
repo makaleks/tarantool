@@ -206,7 +206,8 @@ memtx_engine_recover_raft(const struct xrow_header *row)
 {
 	assert(row->type == IPROTO_RAFT);
 	struct raft_request req;
-	if (xrow_decode_raft(row, &req) != 0)
+	/* Vclock is never persisted in WAL by Raft. */
+	if (xrow_decode_raft(row, &req, NULL) != 0)
 		return -1;
 	raft_process_recovery(&req);
 	return 0;
@@ -516,7 +517,11 @@ checkpoint_new(const char *snap_dirname, uint64_t snap_io_rate_limit)
 	opts.free_cache = true;
 	xdir_create(&ckpt->dir, snap_dirname, SNAP, &INSTANCE_UUID, &opts);
 	vclock_create(&ckpt->vclock);
-	raft_serialize(&ckpt->raft);
+	/*
+	 * Don't encode vclock, because it is stored in the snapshot header
+	 * anyway.
+	 */
+	raft_serialize(&ckpt->raft, NULL);
 	ckpt->touch = false;
 	return ckpt;
 }

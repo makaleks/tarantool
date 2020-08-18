@@ -37,8 +37,19 @@ extern "C" {
 #endif
 
 struct raft_request;
+struct vclock;
+
+enum raft_state {
+	RAFT_STATE_FOLLOWER = 1,
+	RAFT_STATE_CANDIDATE = 2,
+	RAFT_STATE_LEADER = 3,
+};
+
+extern const char *raft_state_strs[];
 
 struct raft {
+	uint32_t leader;
+	enum raft_state state;
 	bool is_enabled;
 	bool is_candidate;
 
@@ -56,9 +67,24 @@ raft_new_term(uint64_t min_new_term);
 void
 raft_vote(uint32_t vote_for);
 
+static inline bool
+raft_is_enabled(void)
+{
+	return raft.is_enabled;
+}
+
+/** Process a raft entry stored in WAL/snapshot. */
 void
 raft_process_recovery(const struct raft_request *req);
 
+/** Process a raft status message coming from the network. */
+void
+raft_process_msg(const struct raft_request *req);
+
+/**
+ * Broadcast the changes in this instance's raft status to all
+ * the followers.
+ */
 void
 raft_cfg_is_enabled(bool is_enabled);
 
@@ -76,7 +102,14 @@ raft_cfg_death_timeout(void);
 
 /** Save complete Raft state into the request. */
 void
-raft_serialize(struct raft_request *req);
+raft_serialize(struct raft_request *req, struct vclock *vclock);
+
+/**
+ * Broadcast the changes in this instance's raft status to all
+ * the followers.
+ */
+void
+raft_broadcast(const struct raft_request *req);
 
 #if defined(__cplusplus)
 }

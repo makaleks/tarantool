@@ -55,6 +55,7 @@
 #include "scoped_guard.h"
 #include "txn_limbo.h"
 #include "journal.h"
+#include "raft.h"
 
 STRS(applier_state, applier_STATE);
 
@@ -314,6 +315,8 @@ apply_final_join_row(struct xrow_header *row)
 	 * sends us is valid.
 	 */
 	if (iproto_type_is_synchro_request(row->type))
+		return 0;
+	if (iproto_type_is_raft_request(row->type))
 		return 0;
 	struct txn *txn = txn_begin();
 	if (txn == NULL)
@@ -894,6 +897,21 @@ err:
 	return -1;
 }
 
+static int
+apply_raft_row(struct xrow_header *row)
+{
+	assert(iproto_type_is_raft_request(row->type));
+
+	struct raft_request req;
+	struct vclock candidate_clock;
+	if (xrow_decode_raft(row, &req, &candidate_clock) != 0)
+		return -1;
+
+	raft_process_msg(&req);
+
+	return 0;
+}
+
 /**
  * Apply all rows in the rows queue as a single transaction.
  *
@@ -1238,11 +1256,20 @@ applier_subscribe(struct applier *applier)
 		 * In case of an heartbeat message wake a writer up
 		 * and check applier state.
 		 */
-		if (stailq_first_entry(&rows, struct applier_tx_row,
-				       next)->row.lsn == 0)
-			applier_signal_ack(applier);
-		else if (applier_apply_tx(&rows) != 0)
+		struct xrow_header *first_row =
+			&stailq_first_entry(&rows, struct applier_tx_row,
+					    next)->row;
+		if (first_row->lsn == 0) {
+			if (unlikely(iproto_type_is_raft_request(
+							first_row->type))) {
+				if (apply_raft_row(first_row) != 0)
+					diag_raise();
+			} else {
+				applier_signal_ack(applier);
+			}
+		} else if (applier_apply_tx(&rows) != 0) {
 			diag_raise();
+		}
 
 		if (ibuf_used(ibuf) == 0)
 			ibuf_reset(ibuf);
