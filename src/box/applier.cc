@@ -67,6 +67,23 @@ applier_set_state(struct applier *applier, enum applier_state state)
 	trigger_run_xc(&applier->on_state, applier);
 }
 
+static inline void
+applier_assign_instance_id(struct applier *applier)
+{
+	/*
+	 * After final join, the applier already received latest
+	 * records from _cluster, including the record about
+	 * source instance. It can be absent in case the source is
+	 * an anonymous replica.
+	 */
+	assert(applier->state == APPLIER_JOINED);
+	struct replica *replica = replica_by_uuid(&applier->uuid);
+	if (replica != NULL)
+		applier->instance_id = replica->id;
+	else
+		assert(applier->instance_id == 0);
+}
+
 /**
  * Write a nice error message to log file on SocketError or ClientError
  * in applier_f().
@@ -603,6 +620,7 @@ applier_join(struct applier *applier)
 	say_info("final data received");
 
 	applier_set_state(applier, APPLIER_JOINED);
+	applier_assign_instance_id(applier);
 	applier_set_state(applier, APPLIER_READY);
 }
 
@@ -1207,6 +1225,7 @@ applier_subscribe(struct applier *applier)
 		    instance_id != REPLICA_ID_NIL) {
 			say_info("final data received");
 			applier_set_state(applier, APPLIER_JOINED);
+			applier_assign_instance_id(applier);
 			applier_set_state(applier, APPLIER_READY);
 			applier_set_state(applier, APPLIER_FOLLOW);
 		}
