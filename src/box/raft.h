@@ -30,6 +30,7 @@
  * SUCH DAMAGE.
  */
 #include <stdint.h>
+#include <stdbool.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -38,8 +39,13 @@ extern "C" {
 struct raft_request;
 
 struct raft {
+	bool is_enabled;
+	bool is_candidate;
+
 	uint64_t term;
 	uint32_t vote;
+
+	double election_timeout;
 };
 
 extern struct raft raft;
@@ -53,6 +59,22 @@ raft_vote(uint32_t vote_for);
 void
 raft_process_recovery(const struct raft_request *req);
 
+void
+raft_cfg_is_enabled(bool is_enabled);
+
+void
+raft_cfg_is_candidate(bool is_candidate);
+
+void
+raft_cfg_election_timeout(double timeout);
+
+void
+raft_cfg_election_quorum(void);
+
+void
+raft_cfg_death_timeout(void);
+
+/** Save complete Raft state into the request. */
 void
 raft_serialize(struct raft_request *req);
 

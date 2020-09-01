@@ -86,6 +86,9 @@ local default_cfg = {
     checkpoint_wal_threshold = 1e18,
     checkpoint_count    = 2,
     worker_pool_threads = 4,
+    raft_is_enabled       = false,
+    raft_is_candidate     = true,
+    raft_election_timeout = 5,
     replication_timeout = 1,
     replication_sync_lag = 10,
     replication_sync_timeout = 300,
@@ -163,6 +166,9 @@ local template_cfg = {
     read_only           = 'boolean',
     hot_standby         = 'boolean',
     worker_pool_threads = 'number',
+    raft_is_enabled       = 'boolean',
+    raft_is_candidate     = 'boolean',
+    raft_election_timeout = 'number',
     replication_timeout = 'number',
     replication_sync_lag = 'number',
     replication_sync_timeout = 'number',
@@ -279,6 +285,9 @@ local dynamic_cfg = {
         require('title').update(box.cfg.custom_proc_title)
     end,
     force_recovery          = function() end,
+    raft_is_enabled         = private.cfg_set_raft_is_enabled,
+    raft_is_candidate       = private.cfg_set_raft_is_candidate,
+    raft_election_timeout   = private.cfg_set_raft_election_timeout,
     replication_timeout     = private.cfg_set_replication_timeout,
     replication_connect_timeout = private.cfg_set_replication_connect_timeout,
     replication_connect_quorum = private.cfg_set_replication_connect_quorum,
@@ -333,6 +342,9 @@ local dynamic_cfg_order = {
     -- the new one. This should be fixed when box.cfg is able to
     -- apply some parameters together and atomically.
     replication_anon        = 250,
+    raft_is_enabled         = 300,
+    raft_is_candidate       = 310,
+    raft_election_timeout   = 320,
 }
 
 local function sort_cfg_cb(l, r)
@@ -350,6 +362,9 @@ local dynamic_cfg_skip_at_load = {
     vinyl_cache             = true,
     vinyl_timeout           = true,
     too_long_threshold      = true,
+    raft_is_enabled         = true,
+    raft_is_candidate       = true,
+    raft_election_timeout   = true,
     replication             = true,
     replication_timeout     = true,
     replication_connect_timeout = true,

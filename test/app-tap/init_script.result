@@ -23,6 +23,9 @@ memtx_memory:107374182
 memtx_min_tuple_size:16
 net_msg_max:768
 pid_file:box.pid
+raft_election_timeout:5
+raft_is_candidate:true
+raft_is_enabled:false
 read_only:false
 readahead:16320
 replication_anon:false

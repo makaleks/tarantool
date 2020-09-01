@@ -55,6 +55,12 @@ cfg_filter(box.cfg)
  |     - 768
  |   - - pid_file
  |     - <hidden>
+ |   - - raft_election_timeout
+ |     - 5
+ |   - - raft_is_candidate
+ |     - true
+ |   - - raft_is_enabled
+ |     - false
  |   - - read_only
  |     - false
  |   - - readahead
@@ -162,6 +168,12 @@ cfg_filter(box.cfg)
  |     - 768
  |   - - pid_file
  |     - <hidden>
+ |   - - raft_election_timeout
+ |     - 5
+ |   - - raft_is_candidate
+ |     - true
+ |   - - raft_is_enabled
+ |     - false
  |   - - read_only
  |     - false
  |   - - readahead
