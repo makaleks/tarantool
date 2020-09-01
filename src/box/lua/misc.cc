@@ -257,23 +257,25 @@ lbox_raft_new_term(struct lua_State *L)
 }
 
 static int
-lbox_raft_vote(struct lua_State *L)
-{
-	uint64_t vote_for = luaL_checkuint64(L, 1);
-	if (vote_for > UINT32_MAX)
-		return luaL_error(L, "Invalid vote");
-	raft_vote(vote_for);
-	return 0;
-}
-
-static int
 lbox_raft_get(struct lua_State *L)
 {
-	lua_createtable(L, 0, 2);
+	lua_createtable(L, 0, 8);
 	luaL_pushuint64(L, raft.term);
 	lua_setfield(L, -2, "term");
+	luaL_pushuint64(L, raft.volatile_term);
+	lua_setfield(L, -2, "volatile_term");
 	luaL_pushuint64(L, raft.vote);
 	lua_setfield(L, -2, "vote");
+	luaL_pushuint64(L, raft.volatile_vote);
+	lua_setfield(L, -2, "volatile_vote");
+	lua_pushstring(L, raft_state_strs[raft.state]);
+	lua_setfield(L, -2, "state");
+	lua_pushinteger(L, raft.vote_count);
+	lua_setfield(L, -2, "vote_count");
+	lua_pushboolean(L, raft.is_write_in_progress);
+	lua_setfield(L, -2, "is_write_in_progress");
+	lua_pushboolean(L, raft.is_candidate);
+	lua_setfield(L, -2, "is_candidate");
 	return 1;
 }
 
@@ -285,7 +287,6 @@ box_lua_misc_init(struct lua_State *L)
 		{"new_tuple_format", lbox_tuple_format_new},
 		/* Temporary helpers to sanity test raft persistency. */
 		{"raft_new_term", lbox_raft_new_term},
-		{"raft_vote", lbox_raft_vote},
 		{"raft_get", lbox_raft_get},
 		{NULL, NULL}
 	};

@@ -31,6 +31,7 @@
  */
 #include <stdint.h>
 #include <stdbool.h>
+#include "tarantool_ev.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -48,14 +49,62 @@ enum raft_state {
 extern const char *raft_state_strs[];
 
 struct raft {
+	/** Instance ID of leader of the current term. */
 	uint32_t leader;
+	/** State of the instance. */
 	enum raft_state state;
+	/**
+	 * Volatile part of the Raft state, whose WAL write may be
+	 * still in-progress, and yet the state may be already
+	 * used. Volatile state is never sent to anywhere, but the
+	 * state machine makes decisions based on it. That is
+	 * vital.
+	 * As an example, volatile vote needs to be used to reject
+	 * votes inside a term, where the instance already voted
+	 * (even if the vote WAL write is not finished yet).
+	 * Otherwise the instance would try to write several votes
+	 * inside one term.
+	 */
+	uint64_t volatile_term;
+	uint32_t volatile_vote;
+	/**
+	 * Flag whether Raft is enabled. When disabled, it still
+	 * persists terms so as to quickly enroll into the cluster
+	 * when (if) it is enabled. In everything else disabled
+	 * Raft does not affect instance work.
+	 */
 	bool is_enabled;
+	/**
+	 * Flag whether the node can become a leader. It is an
+	 * accumulated value of configuration options Raft enabled
+	 * Raft candidate. If at least one is false - the instance
+	 * is not a candidate.
+	 */
 	bool is_candidate;
-
+	/** Flag whether the instance is allowed to be a leader. */
+	bool is_cfg_candidate;
+	/**
+	 * Flag whether Raft currently tries to write something into WAL. It
+	 * happens asynchronously, not right after Raft state is updated.
+	 */
+	bool is_write_in_progress;
+	/**
+	 * Persisted Raft state. These values are used when need to tell current
+	 * Raft state to other nodes.
+	 */
 	uint64_t term;
 	uint32_t vote;
-
+	/** Bit 1 means that a vote from that instance was obtained. */
+	uint32_t vote_mask;
+	/** Number of votes for this instance. Valid only in candidate state. */
+	int vote_count;
+	/** State machine timed event trigger. */
+	struct ev_timer timer;
+	/**
+	 * Dump of Raft state in the end of event loop, when it is changed.
+	 */
+	struct ev_check io;
+	/** Configured election timeout in seconds. */
 	double election_timeout;
 };
 
@@ -66,6 +115,18 @@ raft_new_term(uint64_t min_new_term);
 
 void
 raft_vote(uint32_t vote_for);
+
+static inline bool
+raft_is_ro(void)
+{
+	return raft.is_enabled && raft.state != RAFT_STATE_LEADER;
+}
+
+static inline bool
+raft_is_source_allowed(uint32_t source_id)
+{
+	return !raft.is_enabled || raft.leader == source_id;
+}
 
 static inline bool
 raft_is_enabled(void)
@@ -84,6 +145,9 @@ raft_process_recovery(const struct raft_request *req);
  */
 void
 raft_process_msg(const struct raft_request *req, uint32_t source);
+
+void
+raft_process_heartbeat(uint32_t source);
 
 /**
  * Broadcast the changes in this instance's raft status to all
@@ -114,6 +178,29 @@ raft_serialize(struct raft_request *req, struct vclock *vclock);
  */
 void
 raft_broadcast(const struct raft_request *req);
+
+/**
+ * Bootstrap the current instance as the first leader of the cluster. That is
+ * done bypassing the Raft election protocol, by just assigning this node a
+ * leader role. That is needed, because when the cluster is not bootstrapped, it
+ * is necessary to find a node, which will generate a replicaset UUID, write it
+ * into _cluster space, and register all the other nodes in _cluster.
+ * Until it is done, all nodes but one won't boot. Their WALs won't work. And
+ * therefore they won't be able to participate in leader election. That
+ * effectively makes the cluster dead from the beginning unless the first
+ * bootstrapped node won't declare itself a leader without elections.
+ *
+ * XXX: That does not solve the problem, when the first node boots, creates a
+ * snapshot, and then immediately dies. After recovery it won't declare itself a
+ * leader. Therefore if quorum > 1, the cluster won't proceed to registering
+ * any replicas and becomes completely dead. Perhaps that must be solved by
+ * truncating quorum down to number of records in _cluster.
+ */
+void
+raft_bootstrap_leader(void);
+
+void
+raft_init(void);
 
 #if defined(__cplusplus)
 }

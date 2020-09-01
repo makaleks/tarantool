@@ -157,7 +157,7 @@ void
 box_update_ro_summary(void)
 {
 	bool old_is_ro_summary = is_ro_summary;
-	is_ro_summary = is_ro || is_orphan;
+	is_ro_summary = is_ro || is_orphan || raft_is_ro();
 	/* In 99% nothing changes. Filter this out first. */
 	if (is_ro_summary == old_is_ro_summary)
 		return;
@@ -2646,6 +2646,7 @@ box_init(void)
 
 	txn_limbo_init();
 	sequence_init();
+	raft_init();
 }
 
 bool
@@ -2794,6 +2795,8 @@ box_cfg_xc(void)
 
 	if (!is_bootstrap_leader)
 		replicaset_sync();
+	else if (raft_is_enabled())
+		raft_bootstrap_leader();
 
 	/* box.cfg.read_only is not read yet. */
 	assert(box_is_ro());
