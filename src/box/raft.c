@@ -78,8 +78,9 @@ raft_process_recovery(const struct raft_request *req)
 }
 
 void
-raft_process_msg(const struct raft_request *req)
+raft_process_msg(const struct raft_request *req, uint32_t source)
 {
+	(void)source;
 	if (req->term > raft.term) {
 		// Update term.
 		// The logic will be similar, but the code

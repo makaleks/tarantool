@@ -898,7 +898,7 @@ err:
 }
 
 static int
-apply_raft_row(struct xrow_header *row)
+applier_handle_raft(struct applier *applier, struct xrow_header *row)
 {
 	assert(iproto_type_is_raft_request(row->type));
 
@@ -906,9 +906,7 @@ apply_raft_row(struct xrow_header *row)
 	struct vclock candidate_clock;
 	if (xrow_decode_raft(row, &req, &candidate_clock) != 0)
 		return -1;
-
-	raft_process_msg(&req);
-
+	raft_process_msg(&req, applier->instance_id);
 	return 0;
 }
 
@@ -1262,7 +1260,8 @@ applier_subscribe(struct applier *applier)
 		if (first_row->lsn == 0) {
 			if (unlikely(iproto_type_is_raft_request(
 							first_row->type))) {
-				if (apply_raft_row(first_row) != 0)
+				if (applier_handle_raft(applier,
+							first_row) != 0)
 					diag_raise();
 			} else {
 				applier_signal_ack(applier);
