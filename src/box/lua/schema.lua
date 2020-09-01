@@ -1457,13 +1457,67 @@ base_index_mt.bsize = function(index)
     return tonumber(ret)
 end
 -- index.fselect - formatted select.
-base_index_mt.fselect = function(index, key, opts)
-    -- options.
-    local max_width = 140
-    local min_col_width = 5
-    if opts and opts.max_width and type(opts.max_width) == 'number' then
-        max_width = opts.max_width
+-- Options can be passed through opts, fselect_opts and global variables.
+-- If an option is in opts table or set in global variable - it must have
+-- prefix 'fselect_'. If an option is on fselect_opts table - it may or
+-- may not have the prefix.
+-- Options:
+-- type:
+--   'sql' - like mysql result (default)
+--   'gh' (or 'github' or 'markdown') - markdown syntax, for pasting to github.
+--   'jira' syntax (for pasting to jira)
+-- widths: array with desired widths of columns.
+-- max_width: limit of size of a row. Set to 0 for no limit.
+-- use_nbsp: (default - true) - add spaces
+base_index_mt.fselect = function(index, key, opts, fselect_opts)
+    -- Options.
+    if type(fselect_opts) ~= 'table' then fselect_opts = {} end
+
+    -- Get global value, like _G[name] but wrapped with pcall for strict mode on.
+    local function get_global(name)
+        local function internal() return _G[name] end
+        local success,result = pcall(internal)
+        return success and result or nil
     end
+    -- Get a value from `opts` table and remove it from the table.
+    local function grab_from_opts(name)
+        if type(opts) ~= 'table' then return nil end
+        local res = opts[name]
+        if res ~= nil then opts[name] = nil end
+        return res
+    end
+    -- Find an option in opts, fselect_opts or _G by given name.
+    -- In opts and _G the value is searched with 'fselect_' prefix;
+    -- In fselect_opts - with or without prefix.
+    local function get_opt(name, default, expected_type)
+        local prefix_name = 'fselect_' .. name
+        local variants = {fselect_opts[prefix_name], fselect_opts[name],
+            grab_from_opts(prefix_name), get_global(prefix_name), default }
+        local min_i = 0
+        local min_v = nil
+        for i,v in pairs(variants) do
+            if (type(v) == expected_type and i < min_i) or min_v == nil then
+                min_i = i
+                min_v = v
+            end
+        end
+        return min_v
+    end
+
+    local fselect_type = get_opt('type', 'sql', 'string')
+    if fselect_type == 'gh' or fselect_type == 'github' then
+        fselect_type = 'markdown'
+    end
+    if fselect_type ~= 'sql' and fselect_type ~= 'markdown' and fselect_type ~= 'jira' then
+        fselect_type = 'sql'
+    end
+    local widths = get_opt('widths', {}, 'table')
+    local default_max_width = fselect_type == 'sql' and 140 or 260
+    if #widths > 0 then default_max_width = 0 end
+    local max_width = get_opt('max_width', default_max_width, 'number')
+    local use_nbsp = get_opt('use_nbsp', true, 'boolean')
+    local min_col_width = 5
+    local max_col_width = 1000
 
     -- select and stringify.
     local tab = { }
@@ -1488,21 +1542,27 @@ base_index_mt.fselect = function(index, key, opts)
     for j = 1,num_cols do
         table.insert(names, fmt[j] and fmt[j].name or 'col' .. tostring(j))
     end
-    local widths = {}
     local real_width = num_cols + 1 -- including '|' symbols
     for j = 1,num_cols do
-        local width = math.max(names[j]:len(), min_col_width)
-        for i = 1,num_rows do
-            if tab[i][j] then
-                width = math.max(width, tab[i][j]:len())
+        if type(widths[j]) ~= 'number' then
+            local width = names[j]:len()
+            if fselect_type == 'jira' then
+                width = width + 1
             end
+            for i = 1,num_rows do
+                if tab[i][j] then
+                    width = math.max(width, tab[i][j]:len())
+                end
+            end
+            widths[j] = width
         end
-        real_width = real_width + width
-        table.insert(widths, width)
+        widths[j] = math.max(widths[j], min_col_width)
+        widths[j] = math.min(widths[j], max_col_width)
+        real_width = real_width + widths[j]
     end
 
     -- cut some columns if its width is too big
-    while (real_width > max_width) do
+    while max_width ~= 0 and real_width > max_width do
         local max_j = 1
         for j = 2,num_cols do
             if widths[j] >= widths[max_j] then max_j = j end
@@ -1511,13 +1571,19 @@ base_index_mt.fselect = function(index, key, opts)
         real_width = real_width - 1
     end
 
-    -- I guess there's a bug and yaml treats string '+---' as not a string.
-    -- As a workaround let's prefix all strings with invisible space.
+    -- Yaml wraps all strings that contain spaces with single quotes, and
+    -- does not wrap otherwise. Let's add some invisible spaces to every line
+    -- in order to make them similar in output.
     local prefix = string.char(0xE2) .. string.char(0x80) .. string.char(0x8B)
+    if not use_nbsp then prefix = '' end
 
-    local delim_row = prefix .. '+'
+    local header_row_delim = fselect_type == 'jira' and '||' or '|'
+    local result_row_delim = '|'
+    local delim_row_delim = fselect_type == 'sql' and '+' or '|'
+
+    local delim_row = prefix .. delim_row_delim
     for j = 1,num_cols do
-        delim_row = delim_row .. string.rep('-', widths[j]) .. '+'
+        delim_row = delim_row .. string.rep('-', widths[j]) .. delim_row_delim
     end
 
     -- format string - cut or fill with spaces to make is exactly n symbols.
@@ -1533,28 +1599,41 @@ base_index_mt.fselect = function(index, key, opts)
         else
             str = x:sub(1, n)
         end
-        return str:gsub("%s",string.char(0xC2) .. string.char(0xA0))
+        if use_nbsp then
+            -- replace spaces with &nbsp
+            return str:gsub("%s",string.char(0xC2) .. string.char(0xA0))
+        else
+            return str
+        end
     end
 
     local res = {}
 
     -- insert into res a string with formatted row.
-    local res_insert = function(row)
-        local str_row = prefix .. '|'
+    local res_insert = function(row, is_header)
+        local delim = is_header and header_row_delim or result_row_delim
+        local str_row = prefix .. delim
+        local shrink = fselect_type == 'jira' and is_header and 1 or 0
         for j = 1,num_cols do
-            str_row = str_row .. fmt_str(row[j], widths[j]) .. '|'
+            str_row = str_row .. fmt_str(row[j], widths[j] - shrink) .. delim
         end
         table.insert(res, str_row)
     end
 
     -- format result
-    table.insert(res, delim_row)
-    res_insert(names)
-    table.insert(res, delim_row)
-    for i = 1,num_rows do
-        res_insert(tab[i])
+    if fselect_type == 'sql' then
+        table.insert(res, delim_row)
     end
-    table.insert(res, delim_row)
+    res_insert(names, true)
+    if fselect_type ~= 'jira' then
+        table.insert(res, delim_row)
+    end
+    for i = 1,num_rows do
+        res_insert(tab[i], false)
+    end
+    if fselect_type == 'sql' then
+        table.insert(res, delim_row)
+    end
     return res
 end
 -- Lua 5.2 compatibility
@@ -1798,9 +1877,9 @@ space_mt.select = function(space, key, opts)
     check_space_arg(space, 'select')
     return check_primary_index(space):select(key, opts)
 end
-space_mt.fselect = function(space, key, opts)
+space_mt.fselect = function(space, key, opts, fselect_opts)
     check_space_arg(space, 'select')
-    return check_primary_index(space):fselect(key, opts)
+    return check_primary_index(space):fselect(key, opts, fselect_opts)
 end
 space_mt.insert = function(space, tuple)
     check_space_arg(space, 'insert')
