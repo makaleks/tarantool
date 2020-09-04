@@ -1,6 +1,7 @@
 #include <trivia/config.h>
 #include "memory.h"
 #include "fiber.h"
+#include "key_def_api.h"
 #include "vy_history.h"
 #include "vy_iterators_helper.h"
 

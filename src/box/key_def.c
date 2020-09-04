@@ -146,7 +146,7 @@ key_def_delete(struct key_def *def)
 	free(def);
 }
 
-static void
+void
 key_def_set_func(struct key_def *def)
 {
 	key_def_set_compare_func(def);
@@ -339,56 +339,6 @@ key_def_dump_parts(const struct key_def *def, struct key_part_def *parts,
 		}
 	}
 	return 0;
-}
-
-box_key_def_t *
-box_key_def_new(uint32_t *fields, uint32_t *types, uint32_t part_count)
-{
-	size_t sz = key_def_sizeof(part_count, 0);
-	struct key_def *key_def = calloc(1, sz);
-	if (key_def == NULL) {
-		diag_set(OutOfMemory, sz, "malloc", "struct key_def");
-		return NULL;
-	}
-
-	key_def->part_count = part_count;
-	key_def->unique_part_count = part_count;
-
-	for (uint32_t item = 0; item < part_count; ++item) {
-		if (key_def_set_part(key_def, item, fields[item],
-				     (enum field_type)types[item],
-				     ON_CONFLICT_ACTION_DEFAULT, NULL,
-				     COLL_NONE, SORT_ORDER_ASC, NULL, 0, NULL,
-				     TUPLE_OFFSET_SLOT_NIL, 0) != 0) {
-			key_def_delete(key_def);
-			return NULL;
-		}
-	}
-	key_def_set_func(key_def);
-	return key_def;
-}
-
-void
-box_key_def_delete(box_key_def_t *key_def)
-{
-	key_def_delete(key_def);
-}
-
-int
-box_tuple_compare(box_tuple_t *tuple_a, box_tuple_t *tuple_b,
-		  box_key_def_t *key_def)
-{
-	return tuple_compare(tuple_a, HINT_NONE, tuple_b, HINT_NONE, key_def);
-}
-
-int
-box_tuple_compare_with_key(box_tuple_t *tuple_a, const char *key_b,
-			   box_key_def_t *key_def)
-{
-	uint32_t part_count = mp_decode_array(&key_b);
-	return tuple_compare_with_key(tuple_a, HINT_NONE, key_b,
-				      part_count, HINT_NONE, key_def);
-
 }
 
 int
@@ -891,4 +841,14 @@ key_validate_parts(const struct key_def *key_def, const char *key,
 	}
 	*key_end = key;
 	return 0;
+}
+
+int
+key_def_set_part_175(struct key_def *def, uint32_t part_no, uint32_t fieldno,
+		     enum field_type type)
+{
+	return key_def_set_part(def, part_no, fieldno, type,
+				ON_CONFLICT_ACTION_DEFAULT, NULL, COLL_NONE,
+				SORT_ORDER_ASC, NULL, 0, NULL,
+				TUPLE_OFFSET_SLOT_NIL, 0);
 }

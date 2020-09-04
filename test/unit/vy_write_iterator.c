@@ -1,5 +1,6 @@
 #include "memory.h"
 #include "fiber.h"
+#include "key_def_api.h"
 #include "vy_write_iterator.h"
 #include "vy_iterators_helper.h"
 

@@ -287,62 +287,6 @@ key_def_copy(struct key_def *dest, const struct key_def *src);
 void
 key_def_delete(struct key_def *def);
 
-typedef struct tuple box_tuple_t;
-
-/** \cond public */
-
-typedef struct key_def box_key_def_t;
-
-/**
- * Create key definition with key fields with passed typed on passed positions.
- * May be used for tuple format creation and/or tuple comparison.
- *
- * \param fields array with key field identifiers
- * \param types array with key field types (see enum field_type)
- * \param part_count the number of key fields
- * \returns a new key definition object
- */
-API_EXPORT box_key_def_t *
-box_key_def_new(uint32_t *fields, uint32_t *types, uint32_t part_count);
-
-/**
- * Delete key definition
- *
- * \param key_def key definition to delete
- */
-API_EXPORT void
-box_key_def_delete(box_key_def_t *key_def);
-
-/**
- * Compare tuples using the key definition.
- * @param tuple_a first tuple
- * @param tuple_b second tuple
- * @param key_def key definition
- * @retval 0  if key_fields(tuple_a) == key_fields(tuple_b)
- * @retval <0 if key_fields(tuple_a) < key_fields(tuple_b)
- * @retval >0 if key_fields(tuple_a) > key_fields(tuple_b)
- */
-API_EXPORT int
-box_tuple_compare(box_tuple_t *tuple_a, box_tuple_t *tuple_b,
-		  box_key_def_t *key_def);
-
-/**
- * @brief Compare tuple with key using the key definition.
- * @param tuple tuple
- * @param key key with MessagePack array header
- * @param key_def key definition
- *
- * @retval 0  if key_fields(tuple) == parts(key)
- * @retval <0 if key_fields(tuple) < parts(key)
- * @retval >0 if key_fields(tuple) > parts(key)
- */
-
-API_EXPORT int
-box_tuple_compare_with_key(box_tuple_t *tuple_a, const char *key_b,
-			   box_key_def_t *key_def);
-
-/** \endcond public */
-
 static inline size_t
 key_def_sizeof(uint32_t part_count, uint32_t path_pool_size)
 {
@@ -754,6 +698,36 @@ key_hint(const char *key, uint32_t part_count, struct key_def *key_def)
 {
 	return key_def->key_hint(key, part_count, key_def);
 }
+
+/* {{{ <box_key_def_new>() helpers */
+
+/**
+ * Set key part within @a key_def.
+ *
+ * The same as module private <key_def_set_part>(), but with less
+ * parameters. It is helper for <box_key_def_new>().
+ *
+ * 1.7.5 does not support collation, nullability and further
+ * key_def features.
+ */
+int
+key_def_set_part_175(struct key_def *def, uint32_t part_no, uint32_t fieldno,
+		     enum field_type type);
+
+/**
+ * Update compare, hash and extract functions.
+ *
+ * This function should be called after modification of
+ * @a key_def parts, because different compare, hash and extract
+ * functions should work depending of whether key parts are
+ * sequential, are nullable, whether a tuple may omit several
+ * fields at the end, whether a collation is used and so on.
+ * It is helper for <box_key_def_new>().
+ */
+void
+key_def_set_func(struct key_def *def);
+
+/* }}} <box_key_def_new>() helpers */
 
 #if defined(__cplusplus)
 } /* extern "C" */
