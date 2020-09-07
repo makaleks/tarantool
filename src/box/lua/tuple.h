@@ -79,8 +79,6 @@ luaT_pushtuple(struct lua_State *L, box_tuple_t *tuple);
 box_tuple_t *
 luaT_istuple(struct lua_State *L, int idx);
 
-/** \endcond public */
-
 /**
  * Create a new tuple with specific format from a Lua table, a
  * tuple, or objects on the lua stack.
@@ -88,10 +86,26 @@ luaT_istuple(struct lua_State *L, int idx);
  * Set idx to zero to create the new tuple from objects on the lua
  * stack.
  *
- * In case of an error set a diag and return NULL.
+ * The new tuple is referenced in the same way as one created by
+ * <box_tuple_new>(). There are two possible usage scenarious:
+ *
+ * 1. A short living tuple may not be referenced explicitly and
+ *    will be collected automatically at the next module API call
+ *    that yields or returns a tuple.
+ * 2. A long living tuple must be referenced using
+ *    <box_tuple_ref>() and unreferenced than with
+ *    <box_tuple_unref>().
+ *
+ * @sa box_tuple_ref()
+ *
+ * If encoding fails, raise an error.
+ *
+ * In case of any other error set a diag and return NULL.
  */
-struct tuple *
+API_EXPORT box_tuple_t *
 luaT_tuple_new(struct lua_State *L, int idx, box_tuple_format_t *format);
+
+/** \endcond public */
 
 static inline int
 luaT_pushtupleornil(struct lua_State *L, struct tuple *tuple)
