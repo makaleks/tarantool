@@ -97,7 +97,7 @@ luaT_istuple(struct lua_State *L, int narg)
 	return *(struct tuple **) data;
 }
 
-struct tuple *
+box_tuple_t *
 luaT_tuple_new(struct lua_State *L, int idx, box_tuple_format_t *format)
 {
 	if (idx != 0 && !lua_istable(L, idx) && !luaT_istuple(L, idx)) {
@@ -126,8 +126,8 @@ luaT_tuple_new(struct lua_State *L, int idx, box_tuple_format_t *format)
 		luamp_encode_tuple(L, &tuple_serializer, &stream, idx);
 	}
 	mpstream_flush(&stream);
-	struct tuple *tuple = box_tuple_new(format, buf->buf,
-					    buf->buf + ibuf_used(buf));
+	box_tuple_t *tuple = box_tuple_new(format, buf->buf,
+					   buf->buf + ibuf_used(buf));
 	if (tuple == NULL)
 		return NULL;
 	ibuf_reinit(tarantool_lua_ibuf);
