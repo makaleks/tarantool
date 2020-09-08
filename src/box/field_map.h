@@ -38,11 +38,15 @@
 struct region;
 struct field_map_builder_slot;
 
+/** \cond public */
+
 /**
  * A special value of multikey index that means that the key
  * definition is not multikey and no indirection is expected.
  */
 enum { MULTIKEY_NONE = -1 };
+
+/** \endcond public */
 
 /**
  * A field map is a special area is reserved before tuple's
