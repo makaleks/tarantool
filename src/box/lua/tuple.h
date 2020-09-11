@@ -68,6 +68,35 @@ box_tuple_t *
 luaT_istuple(struct lua_State *L, int idx);
 
 /**
+ * Encode a Lua table, a tuple or objects on a Lua stack as raw
+ * tuple data (MsgPack).
+ *
+ * @param L             Lua state
+ * @param idx           acceptable index on the Lua stack
+ *                      (or zero, see below)
+ * @param tuple_len_ptr where to store tuple data size in bytes
+ *                      (or NULL)
+ *
+ * Set idx to zero to create the new tuple from objects on the Lua
+ * stack.
+ *
+ * The data is encoded on the shared buffer: so called
+ * <tarantool_lua_ibuf> (it also available as <buffer.SHARED_IBUF>
+ * in Lua). The data is valid until next similar call. It is
+ * generally safe to pass the result to a box function (copy it if
+ * doubt). No need to release this buffer explicitly, it'll be
+ * reused by later calls.
+ *
+ * If encoding fails, raise an error.
+ *
+ * In case of any other error set a diag and return NULL.
+ *
+ * @sa luaT_tuple_new()
+ */
+API_EXPORT char *
+luaT_tuple_encode(struct lua_State *L, int idx, size_t *tuple_len_ptr);
+
+/**
  * Create a new tuple with specific format from a Lua table, a
  * tuple, or objects on the lua stack.
  *

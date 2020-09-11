@@ -130,6 +130,7 @@ luaL_touint64
 luaL_toint64
 luaT_pushtuple
 luaT_istuple
+luaT_tuple_encode
 luaT_tuple_new
 luaT_error
 luaT_call
