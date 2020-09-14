@@ -539,6 +539,19 @@ luaT_tolstring(lua_State *L, int idx, size_t *ssize);
 LUA_API int
 luaL_iscallable(lua_State *L, int idx);
 
+
+/**
+ * @brief Creates a new Lua coroutine in a protected frame. If
+ * <lua_newthread> call underneath succeeds, the created Lua state
+ * is on the top of the guest stack and a pointer to this state is
+ * returned. Otherwise LUA_ERRMEM error is handled and the result
+ * is NULL.
+ * @param L is a Lua state
+ * @sa <lua_newthread>
+ */
+struct lua_State *
+luaT_newthread(struct lua_State *L);
+
 /** \endcond public */
 
 /**
@@ -615,18 +628,6 @@ luaL_checkfinite(struct lua_State *L, struct luaL_serializer *cfg,
 	if (!cfg->decode_invalid_numbers && !isfinite(number))
 		luaL_error(L, "number must not be NaN or Inf");
 }
-
-/**
- * @brief Creates a new Lua coroutine in a protected frame. If
- * <lua_newthread> call underneath succeeds, the created Lua state
- * is on the top of the guest stack and a pointer to this state is
- * returned. Otherwise LUA_ERRMEM error is handled and the result
- * is NULL.
- * @param L is a Lua state
- * @sa <lua_newthread>
- */
-struct lua_State *
-luaT_newthread(struct lua_State *L);
 
 /**
  * Check if a value on @a L stack by index @a idx is an ibuf
