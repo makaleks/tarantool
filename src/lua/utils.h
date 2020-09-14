@@ -505,6 +505,29 @@ luaT_state(void);
 LUA_API const char *
 luaT_tolstring(lua_State *L, int idx, size_t *ssize);
 
+/**
+ * Check whether a Lua object is a function or has
+ * metatable/metatype with a __call field.
+ *
+ * Note: It does not check type of __call metatable/metatype
+ * field.
+ */
+LUA_API int
+luaL_iscallable(lua_State *L, int idx);
+
+
+/**
+ * @brief Creates a new Lua coroutine in a protected frame. If
+ * <lua_newthread> call underneath succeeds, the created Lua state
+ * is on the top of the guest stack and a pointer to this state is
+ * returned. Otherwise LUA_ERRMEM error is handled and the result
+ * is NULL.
+ * @param L is a Lua state
+ * @sa <lua_newthread>
+ */
+struct lua_State *
+luaT_newthread(struct lua_State *L);
+
 /** \endcond public */
 
 void
@@ -604,18 +627,6 @@ luaL_checkibuf(struct lua_State *L, int idx);
 int
 luaL_checkconstchar(struct lua_State *L, int idx, const char **res,
 		    uint32_t *cdata_type_p);
-
-/**
- * @brief Creates a new Lua coroutine in a protected frame. If
- * <lua_newthread> call underneath succeeds, the created Lua state
- * is on the top of the guest stack and a pointer to this state is
- * returned. Otherwise LUA_ERRMEM error is handled and the result
- * is NULL.
- * @param L is a Lua state
- * @sa <lua_newthread>
- */
-struct lua_State *
-luaT_newthread(struct lua_State *L);
 
 int
 tarantool_lua_utils_init(struct lua_State *L);
