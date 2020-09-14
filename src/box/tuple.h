@@ -283,6 +283,17 @@ box_tuple_update(box_tuple_t *tuple, const char *expr, const char *expr_end);
 box_tuple_t *
 box_tuple_upsert(box_tuple_t *tuple, const char *expr, const char *expr_end);
 
+/**
+ * Check tuple data correspondence to the space format.
+ * @param format Format to which the tuple must match.
+ * @param tuple  Tuple to validate.
+ *
+ * @retval  0 The tuple is valid.
+ * @retval -1 The tuple is invalid.
+ */
+int
+box_tuple_validate(box_tuple_format_t *format, box_tuple_t *tuple);
+
 /** \endcond public */
 
 /**
