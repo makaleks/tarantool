@@ -78,6 +78,8 @@ luaL_pushuuid(struct lua_State *L);
 
 /** \cond public */
 
+struct luaL_Reg;
+
 /**
  * @brief Checks whether a value on the Lua stack is a cdata.
  *
@@ -442,6 +444,8 @@ luaL_checkfield(struct lua_State *L, struct luaL_serializer *cfg, int idx,
 	luaL_convertfield(L, cfg, idx, field);
 }
 
+/** \cond public */
+
 void
 luaL_register_type(struct lua_State *L, const char *type_name,
 		   const struct luaL_Reg *methods);
@@ -450,8 +454,6 @@ luaL_register_type(struct lua_State *L, const char *type_name,
 void
 luaL_register_module(struct lua_State *L, const char *modname,
 		     const struct luaL_Reg *methods);
-
-/** \cond public */
 
 /**
  * Push uint64_t onto the stack
