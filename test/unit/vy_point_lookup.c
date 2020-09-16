@@ -1,5 +1,6 @@
 #include "trivia/util.h"
 #include "unit.h"
+#include "key_def_api.h"
 #include "vy_lsm.h"
 #include "vy_cache.h"
 #include "vy_run.h"

@@ -198,7 +198,7 @@ set(api_headers
     ${CMAKE_SOURCE_DIR}/src/lua/utils.h
     ${CMAKE_SOURCE_DIR}/src/box/txn.h
     ${CMAKE_SOURCE_DIR}/src/box/tuple.h
-    ${CMAKE_SOURCE_DIR}/src/box/key_def.h
+    ${CMAKE_SOURCE_DIR}/src/box/key_def_api.h
     ${CMAKE_SOURCE_DIR}/src/box/field_def.h
     ${CMAKE_SOURCE_DIR}/src/box/tuple_format.h
     ${CMAKE_SOURCE_DIR}/src/box/tuple_extract_key.h
@@ -230,7 +230,7 @@ target_link_libraries(server core bit uri uuid ${ICU_LIBRARIES})
 # Rule of thumb: if exporting a symbol from a static library, list the
 # library here.
 set (reexport_libraries server core misc bitset csv
-     ${LUAJIT_LIBRARIES} ${MSGPUCK_LIBRARIES} ${ICU_LIBRARIES})
+     tuple ${LUAJIT_LIBRARIES} ${MSGPUCK_LIBRARIES} ${ICU_LIBRARIES})
 
 set (common_libraries
     ${reexport_libraries}
