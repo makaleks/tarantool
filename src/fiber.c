@@ -1119,6 +1119,30 @@ fiber_destroy_all(struct cord *cord)
 						      struct fiber, link));
 }
 
+size_t
+box_region_used(void)
+{
+	return region_used(&fiber()->gc);
+}
+
+void *
+box_region_alloc(size_t size)
+{
+	return region_alloc(&fiber()->gc, size);
+}
+
+void *
+box_region_aligned_alloc(size_t size, size_t alignment)
+{
+	return region_aligned_alloc(&fiber()->gc, size, alignment);
+}
+
+void
+box_region_truncate(size_t size)
+{
+	return region_truncate(&fiber()->gc, size);
+}
+
 void
 cord_create(struct cord *cord, const char *name)
 {
