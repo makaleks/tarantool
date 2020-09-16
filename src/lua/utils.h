@@ -554,6 +554,41 @@ luaL_iscallable(lua_State *L, int idx);
 struct lua_State *
 luaT_newthread(struct lua_State *L);
 
+/**
+ * Get a temporary Lua state.
+ *
+ * Use case: a function does not accept a Lua state as an argument
+ * to allow using from C code, but uses a Lua value, which is
+ * referenced in LUA_REGISTRYINDEX. A temporary Lua stack is needed
+ * to get and process the value.
+ *
+ * The resulting Lua state has a separate Lua stack, but the same
+ * globals and registry as `tarantool_L` (and all Lua states in
+ * tarantool at the moment of writing this).
+ *
+ * This Lua state should be used only from one fiber: otherwise
+ * one fiber may change the stack and another one will access a
+ * wrong stack slot when it will be scheduled for execution after
+ * yield.
+ *
+ * Return a Lua state on success and set @a coro_ref and @a top.
+ * These values should be passed to
+ * `luaT_release_temp_luastate()`, when the state is not needed
+ * anymore.
+ *
+ * Return NULL and set a diag at failure.
+ */
+struct lua_State *
+luaT_temp_luastate(int *coro_ref, int *top);
+
+/**
+ * Release a temporary Lua state.
+ *
+ * It complements `luaT_temp_luastate()`.
+ */
+void
+luaT_release_temp_luastate(struct lua_State *L, int coro_ref, int top);
+
 /** \endcond public */
 
 /**

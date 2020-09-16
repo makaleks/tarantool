@@ -1259,6 +1259,55 @@ luaT_newthread(struct lua_State *L)
 	return L1;
 }
 
+struct lua_State *
+luaT_temp_luastate(int *coro_ref, int *top)
+{
+	if (fiber()->storage.lua.stack != NULL) {
+		/*
+		 * Reuse existing stack. In the releasing function
+		 * we should drop a stack top to its initial
+		 * value to don't exhaust available slots by
+		 * many requests in row.
+		 */
+		struct lua_State *L = fiber()->storage.lua.stack;
+		*coro_ref = LUA_NOREF;
+		*top = lua_gettop(L);
+		return L;
+	}
+
+	/* Popped by luaL_ref(). */
+	struct lua_State *L = luaT_newthread(tarantool_L);
+	if (L == NULL)
+		return NULL;
+	/*
+	 * We should remove the reference to the newly created Lua
+	 * thread from tarantool_L, because of two reasons:
+	 *
+	 * First, if we'll push something to tarantool_L and
+	 * yield, then another fiber will not know that a stack
+	 * top is changed and may operate on a wrong slot.
+	 *
+	 * Second, many requests that push a value to tarantool_L
+	 * and yield may exhaust available slots on the stack. It
+	 * is limited by LUAI_MAXSTACK build time constant (~65K).
+	 *
+	 * We cannot just pop the value, but should keep the
+	 * reference in the registry while it is in use.
+	 * Otherwise it may be garbage collected.
+	 */
+	*coro_ref = luaL_ref(tarantool_L, LUA_REGISTRYINDEX);
+	*top = -1;
+	return L;
+}
+
+void
+luaT_release_temp_luastate(struct lua_State *L, int coro_ref, int top)
+{
+	if (top >= 0)
+		lua_settop(L, top);
+	luaL_unref(tarantool_L, LUA_REGISTRYINDEX, coro_ref);
+}
+
 int
 tarantool_lua_utils_init(struct lua_State *L)
 {
