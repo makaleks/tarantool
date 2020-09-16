@@ -36,6 +36,7 @@ extern "C" {
 #endif /* defined(__cplusplus) */
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "trivia/util.h"
 
 typedef struct tuple box_tuple_t;
@@ -262,6 +263,20 @@ box_key_def_merge(const box_key_def_t *first, const box_key_def_t *second);
 API_EXPORT char *
 box_tuple_extract_key_ex(box_tuple_t *tuple, box_key_def_t *key_def,
 			 int multikey_idx, uint32_t *key_size_ptr);
+
+/**
+ * Check that parts of the key match with the key definition.
+ *
+ * @param key_def        Key definition.
+ * @param key            MessagePack'ed data for matching.
+ * @param allow_nullable True if nullable parts are allowed.
+ *
+ * @retval 0  The key is valid.
+ * @retval -1 The key is invalid.
+ */
+API_EXPORT int
+box_key_def_validate_key(const box_key_def_t *key_def, const char *key,
+			 bool allow_nullable);
 
 /** \endcond public */
 
