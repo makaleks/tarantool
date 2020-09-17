@@ -274,4 +274,12 @@ box_key_def_merge(const box_key_def_t *first, const box_key_def_t *second)
 	return key_def_merge(first, second);
 }
 
+char *
+box_tuple_extract_key_ex(box_tuple_t *tuple, box_key_def_t *key_def,
+			 int ignored, uint32_t *key_size_ptr)
+{
+	(void) ignored;
+	return tuple_extract_key(tuple, key_def, key_size_ptr);
+}
+
 /* }}} API functions implementations */

@@ -172,6 +172,7 @@ box_tuple_next
 box_tuple_update
 box_tuple_upsert
 box_tuple_extract_key
+box_tuple_extract_key_ex
 box_tuple_validate_key_parts
 box_tuple_compare
 box_tuple_compare_with_key
