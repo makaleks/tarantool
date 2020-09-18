@@ -565,6 +565,23 @@ luaT_temp_luastate(int *coro_ref, int *top);
 void
 luaT_release_temp_luastate(struct lua_State *L, int coro_ref, int top);
 
+/**
+ * Check if a value on @a L stack by index @a idx is an ibuf
+ * object. Both 'struct ibuf' and 'struct ibuf *' are accepted.
+ * Returns NULL, if can't convert - not an ibuf object.
+ */
+struct ibuf *
+luaL_checkibuf(struct lua_State *L, int idx);
+
+/**
+ * Check if a value on @a L stack by index @a idx is pointer at
+ * char or const char. '(char *)NULL' is also considered a valid
+ * char pointer.
+ */
+int
+luaL_checkconstchar(struct lua_State *L, int idx, const char **res,
+		    uint32_t *cdata_type_p);
+
 /** \endcond public */
 
 void
