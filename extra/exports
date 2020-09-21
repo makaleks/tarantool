@@ -118,7 +118,10 @@ coio_call
 coio_getaddrinfo
 luaL_pushcdata
 luaL_iscdata
+luaL_iscallable
 luaL_checkcdata
+luaL_checkconstchar
+luaL_checkibuf
 luaL_setcdatagc
 luaL_ctypeid
 luaL_cdef
@@ -129,13 +132,16 @@ luaL_checkint64
 luaL_touint64
 luaL_toint64
 luaT_pushtuple
+luaT_newthread
 luaT_istuple
 luaT_tuple_encode
 luaT_tuple_new
 luaT_error
 luaT_call
 luaT_cpcall
+luaT_release_temp_luastate
 luaT_state
+luaT_temp_luastate
 luaT_tolstring
 box_txn
 box_txn_begin
@@ -148,6 +154,7 @@ box_txn_id
 box_key_def_new
 box_key_def_delete
 box_key_def_dump_parts
+box_key_def_dup
 box_key_def_new_ex
 box_key_def_merge
 box_key_def_validate_key
@@ -174,6 +181,7 @@ box_tuple_update
 box_tuple_upsert
 box_tuple_extract_key
 box_tuple_extract_key_ex
+box_tuple_validate
 box_tuple_validate_key_parts
 box_tuple_compare
 box_tuple_compare_with_key
@@ -223,6 +231,16 @@ box_region_aligned_alloc
 box_region_alloc
 box_region_truncate
 box_region_used
+mp_char2escape
+mp_decode_extl
+mp_ext_hint
+mp_format
+mp_fprint
+mp_parser_hint
+mp_snprint
+mp_type_hint
+mp_vformat
+
 
 # Lua / LuaJIT
 
@@ -324,6 +342,8 @@ luaopen_ffi
 luaL_openlibs
 luaL_openlib
 luaL_register
+luaL_register_module
+luaL_register_type
 luaL_getmetafield
 luaL_callmeta
 luaL_typerror
