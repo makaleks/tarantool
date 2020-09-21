@@ -161,6 +161,15 @@ API_EXPORT void
 box_key_def_delete(box_key_def_t *key_def);
 
 /**
+ * Dump key part definitions of given key_def.
+ *
+ * The function allocates key parts on the box region.
+ * @sa <box_region_truncate>().
+ */
+API_EXPORT box_key_part_def_t *
+box_key_def_dump_parts(const box_key_def_t *key_def, uint32_t *part_count_ptr);
+
+/**
  * Compare tuples using the key definition.
  * @param tuple_a first tuple
  * @param tuple_b second tuple
