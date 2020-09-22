@@ -541,6 +541,12 @@ luaT_tolstring(lua_State *L, int idx, size_t *ssize);
 LUA_API int
 luaL_iscallable(lua_State *L, int idx);
 
+/**
+ * Check whether a Lua object is a cdata metatype with a __call field.
+ *
+ */
+LUA_API int
+luaL_cdata_iscallable(lua_State *L, int idx);
 
 /**
  * @brief Creates a new Lua coroutine in a protected frame. If
