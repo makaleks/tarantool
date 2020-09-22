@@ -119,6 +119,7 @@ coio_getaddrinfo
 luaL_pushcdata
 luaL_iscdata
 luaL_iscallable
+luaL_cdata_iscallable
 luaL_checkcdata
 luaL_checkconstchar
 luaL_checkibuf

@@ -1058,7 +1058,7 @@ luaL_checkconstchar(struct lua_State *L, int idx, const char **res,
 }
 
 /* Based on ffi_meta___call() from luajit/src/lib_ffi.c. */
-static int
+int
 luaL_cdata_iscallable(lua_State *L, int idx)
 {
 	/* Calculate absolute value in the stack. */
