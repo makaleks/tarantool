@@ -281,7 +281,7 @@ macro(enable_tnt_compile_flags)
         if (NOT CMAKE_COMPILER_IS_CLANG)
             message(FATAL_ERROR "Undefined behaviour sanitizer only available for clang")
         else()
-            string(JOIN "," SANITIZE_FLAGS
+            string(CONCAT "," SANITIZE_FLAGS
                 alignment bool bounds builtin enum float-cast-overflow
                 float-divide-by-zero function integer-divide-by-zero return
                 shift unreachable vla-bound

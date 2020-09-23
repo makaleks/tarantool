@@ -46,7 +46,7 @@ lcg_compat_check()
 		0, 55, 62, 8, 45, 59, 86, 97, 82, 59,
 		73, 37, 17, 56, 86, 21, 90, 37, 38, 83
 	};
-	for (size_t i = 0; i < sizeof(golden100) / sizeof(int64_t); ++i)
+	for (size_t i = 0; i < sizeof(golden100) / sizeof(int32_t); ++i)
 		check_guava_correctness(golden100[i]);
 
 	fail_if(6     != guava(10863919174838991ULL, 11));
