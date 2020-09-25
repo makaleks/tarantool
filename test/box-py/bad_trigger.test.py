@@ -2,7 +2,7 @@ from lib.box_connection import BoxConnection
 from lib.tarantool_connection import TarantoolConnection
 from tarantool import NetworkError
 from tarantool.const import IPROTO_GREETING_SIZE, IPROTO_CODE, IPROTO_ERROR, \
-    REQUEST_TYPE_ERROR
+    REQUEST_TYPE_ERROR, REQUEST_TYPE_PING
 import socket
 import msgpack
 
@@ -26,9 +26,25 @@ s = conn.socket
 # Read greeting
 print 'greeting: ', len(s.recv(IPROTO_GREETING_SIZE)) == IPROTO_GREETING_SIZE
 
-# Read error packet
+# Check socket
 IPROTO_FIXHEADER_SIZE = 5
-fixheader = s.recv(IPROTO_FIXHEADER_SIZE)
+s.setblocking(False)
+fixheader = None
+try:
+    fixheader = s.recv(IPROTO_FIXHEADER_SIZE)
+except socket.error as err:
+    print 'Nothing to read yet:', str(err).split(']')[1]
+else:
+    print 'Received fixheader'
+s.setblocking(True)
+
+# Send ping
+query = msgpack.dumps({ IPROTO_CODE : REQUEST_TYPE_PING })
+s.send(msgpack.dumps(len(query)) + query)
+
+# Read error packet
+if not fixheader:
+    fixheader = s.recv(IPROTO_FIXHEADER_SIZE)
 print 'fixheader: ', len(fixheader) == IPROTO_FIXHEADER_SIZE
 unpacker.feed(fixheader)
 packet_len = unpacker.unpack()

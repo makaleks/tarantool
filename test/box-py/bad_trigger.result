@@ -14,6 +14,7 @@ type(box.session.on_connect(f1))
 - function
 ...
 greeting:  True
+Nothing to read yet:  Resource temporarily unavailable
 fixheader:  True
 error code 32
 error message:  [string "function f1() nosuchfunction() end"]:1: attempt to call global 'nosuchfunction' (a nil value)

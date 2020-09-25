@@ -752,6 +752,10 @@ if is_remote then
 end;
  | ---
  | ...
+test_run:wait_cond(function() return box.info.sql().cache.size == 0 end, 10);
+ | ---
+ | - true
+ | ...
 box.cfg{sql_cache_size = 0};
  | ---
  | ...

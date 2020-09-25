@@ -271,6 +271,7 @@ if is_remote then
     cn:close()
     cn = remote.connect(box.cfg.listen)
 end;
+test_run:wait_cond(function() return box.info.sql().cache.size == 0 end, 10);
 box.cfg{sql_cache_size = 0};
 box.cfg{sql_cache_size = 3000};
 
