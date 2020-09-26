@@ -2081,5 +2081,16 @@ key_def_set_compare_func(struct key_def *def)
 			key_def_set_compare_func_json<false, false>(def);
 		}
 	}
+	for (uint32_t i = 0; i < def->part_count; ++i) {
+		if (def->parts[i].type == FIELD_TYPE_ANY ||
+		    def->parts[i].type == FIELD_TYPE_ARRAY ||
+		    def->parts[i].type == FIELD_TYPE_MAP) {
+			/* Tuple comparators don't support these types. */
+			def->tuple_compare = NULL;
+			def->tuple_compare_with_key = NULL;
+			def->unsupported_type = def->parts[i].type;
+			break;
+		}
+	}
 	key_def_set_hint_func(def);
 }

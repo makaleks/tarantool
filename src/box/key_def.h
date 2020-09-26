@@ -255,8 +255,14 @@ struct key_def {
 	 * path index key_def::multikey_path.
 	 * Valid when key_def->is_multikey is true,
 	 * undefined otherwise.
-	*/
+	 */
 	uint32_t multikey_fieldno;
+	/**
+	 * First part type not supported for comparison.
+	 * Valid if key_def does not support comparison
+	 * (key_def->tuple_compare* == NULL), undefined othewise.
+	 */
+	enum field_type unsupported_type;
 	/** The size of the 'parts' array. */
 	uint32_t part_count;
 	/** Description of parts of a multipart index. */
@@ -650,6 +656,7 @@ tuple_compare(struct tuple *tuple_a, hint_t tuple_a_hint,
 	      struct tuple *tuple_b, hint_t tuple_b_hint,
 	      struct key_def *key_def)
 {
+	assert(key_def->tuple_compare != NULL);
 	return key_def->tuple_compare(tuple_a, tuple_a_hint,
 				      tuple_b, tuple_b_hint, key_def);
 }
@@ -672,6 +679,7 @@ tuple_compare_with_key(struct tuple *tuple, hint_t tuple_hint,
 		       const char *key, uint32_t part_count,
 		       hint_t key_hint, struct key_def *key_def)
 {
+	assert(key_def->tuple_compare_with_key != NULL);
 	return key_def->tuple_compare_with_key(tuple, tuple_hint, key,
 					       part_count, key_hint, key_def);
 }
