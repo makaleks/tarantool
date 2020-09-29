@@ -39,6 +39,8 @@
 
 static int rfd;
 
+static uint64_t state[4];
+
 void
 random_init(void)
 {
@@ -63,6 +65,8 @@ random_init(void)
 srand:
 	srandom(seed);
 	srand(seed);
+
+	random_bytes((char *)state, 32);
 }
 
 void
@@ -96,4 +100,57 @@ rand:
 	/* fill remaining bytes with PRNG */
 	while (generated < size)
 		buf[generated++] = rand();
+}
+
+uint64_t
+real_random(void)
+{
+	uint64_t result;
+	random_bytes((char *)(&result), 8);
+	return result;
+}
+
+static inline
+uint64_t rotl(const uint64_t x, int k)
+{
+	return (x << k) | (x >> (64 - k));
+}
+
+uint64_t
+pseudo_random(void)
+{
+	const uint64_t result = rotl(state[0] + state[3], 23) + state[0];
+	const uint64_t t = state[1] << 17;
+	state[2] ^= state[0];
+	state[3] ^= state[1];
+	state[1] ^= state[2];
+	state[0] ^= state[3];
+	state[2] ^= t;
+	state[3] = rotl(state[3], 45);
+	return result;
+}
+
+static inline uint64_t
+random_in_range(uint64_t (*rnd)(void), uint64_t range)
+{
+	uint64_t mask = UINT64_MAX >> __builtin_clzll(range | 1);
+	uint64_t result;
+	do {
+		result = rnd() & mask;
+	} while (result > range);
+	return result;
+}
+
+int64_t
+real_random_in_range(int64_t min, int64_t max)
+{
+	assert(max >= min);
+	return min + random_in_range(real_random, (uint64_t) (max - min));
+}
+
+int64_t
+pseudo_random_in_range(int64_t min, int64_t max)
+{
+	assert(max >= min);
+	return min + random_in_range(pseudo_random, (uint64_t) (max - min));
 }
